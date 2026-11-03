@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Open Banking Comparator</title>
+  <meta name="description" content="Compare every Australian bank's products using public Consumer Data Right (Open Banking) product data, refreshed daily." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="wrap top-inner">
+      <div class="brandmark">
+        <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><rect x="2" y="14" width="5" height="12" rx="1.5" fill="currentColor" opacity=".45"/><rect x="11.5" y="8" width="5" height="18" rx="1.5" fill="currentColor" opacity=".7"/><rect x="21" y="2" width="5" height="24" rx="1.5" fill="currentColor"/></svg>
+        <div>
+          <h1>Open Banking Comparator</h1>
+          <p class="sub">Every Australian bank's published products, compared — straight from the CDR product APIs</p>
+        </div>
+      </div>
+      <div id="freshness" class="freshness" aria-live="polite">Loading data…</div>
+    </div>
+    <nav class="wrap tabs" role="tablist" id="tabs">
+      <button role="tab" data-tab="insights" aria-selected="true">Insights</button>
+      <button role="tab" data-tab="home">Home loans</button>
+      <button role="tab" data-tab="deposits">Savings &amp; term deposits</button>
+      <button role="tab" data-tab="cards">Cards &amp; personal loans</button>
+      <button role="tab" data-tab="all">All products</button>
+      <button role="tab" data-tab="quality">Data quality</button>
+      <button role="tab" data-tab="about">About</button>
+    </nav>
+  </header>
+
+  <main class="wrap" id="main">
+    <section id="tab-insights" class="tab"></section>
+    <section id="tab-home" class="tab" hidden></section>
+    <section id="tab-deposits" class="tab" hidden></section>
+    <section id="tab-cards" class="tab" hidden></section>
+    <section id="tab-all" class="tab" hidden></section>
+    <section id="tab-quality" class="tab" hidden></section>
+    <section id="tab-about" class="tab" hidden></section>
+  </main>
+
+  <div id="drawer" class="drawer" hidden>
+    <div class="drawer-backdrop" data-close></div>
+    <aside class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+      <button class="drawer-close" data-close aria-label="Close">×</button>
+      <div id="drawer-body"></div>
+    </aside>
+  </div>
+
+  <footer class="wrap foot">
+    Rates are as published by each data holder via the Consumer Data Right product reference APIs and may differ from what you're offered.
+    This is general information only, not financial advice. Check the provider's website and product disclosure before deciding.
+  </footer>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

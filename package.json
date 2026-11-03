@@ -1,0 +1,14 @@
+{
+  "name": "cdr-bank-product-comparator",
+  "version": "1.0.0",
+  "description": "Compares every Australian bank's products using the public Consumer Data Right (Open Banking) product reference APIs, refreshed daily.",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "refresh": "node pipeline/build.mjs",
+    "mock": "node scripts/mock-server.mjs",
+    "refresh:mock": "CDR_REGISTER_URL=http://localhost:8787/cdr-register/v1/banking/data-holders/brands/summary node pipeline/build.mjs",
+    "serve": "node scripts/serve-site.mjs"
+  }
+}
