@@ -10,8 +10,8 @@ export const config = {
   // Product reference endpoints (unauthenticated, public). We ask for the newest
   // version we understand and accept anything down to v1; the normaliser is tolerant.
   productsPath: '/cds-au/v1/banking/products',
-  productsVersion: { xv: 4, xmin: 1 },
-  productDetailVersion: { xv: 6, xmin: 1 },
+  productsVersion: { xv: 6, xmin: 1 },
+  productDetailVersion: { xv: 8, xmin: 1 },
   pageSize: 100,
   maxPages: 50,
 

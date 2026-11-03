@@ -49,8 +49,48 @@ export function getJson(url, { xv, xmin }) {
   return hostLimit(url)(() => globalLimit(() => doGet(url, xv, xmin)));
 }
 
+// Which version headers worked for each host + endpoint, so we only probe once per holder.
+const versionCache = new Map();
+
+const isVersionError = (status, body) =>
+  status === 406 || ((status === 400 || status === 422) && /version/i.test(body));
+
+/**
+ * Version strategy. Some holders don't honour x-min-v ranges and reject the whole
+ * request (406 Header/UnsupportedVersion) instead of returning their highest supported
+ * version. So: try the range first (standard behaviour), then each exact version from
+ * newest to oldest, and remember what worked for that host.
+ */
 async function doGet(url, xv, xmin) {
-  let version = xv;
+  const cacheKey = `${new URL(url).host}|${xv}-${xmin}`;
+  const modes = [{ xv, xmin }];
+  for (let v = xv; v >= xmin; v--) modes.push({ xv: v, xmin: v });
+  const cached = versionCache.get(cacheKey);
+  if (cached) modes.unshift(cached);
+
+  let lastErr;
+  const tried = new Set();
+  for (const mode of modes) {
+    const sig = `${mode.xv}-${mode.xmin}`;
+    if (tried.has(sig)) continue;
+    tried.add(sig);
+    try {
+      const r = await attemptGet(url, mode);
+      versionCache.set(cacheKey, mode);
+      return r;
+    } catch (err) {
+      lastErr = err;
+      if (!err.versionError) {
+        stats.failures++;
+        throw err; // only keep probing on version problems
+      }
+    }
+  }
+  stats.failures++;
+  throw lastErr;
+}
+
+async function attemptGet(url, { xv: version, xmin }) {
   let lastErr;
   for (let attempt = 0; attempt <= config.retries; attempt++) {
     const ctrl = new AbortController();
@@ -67,11 +107,11 @@ async function doGet(url, xv, xmin) {
         signal: ctrl.signal,
         redirect: 'follow',
       });
-      if (res.status === 406 && version > xmin) {
-        // Holder doesn't support the requested range properly — step down and retry.
-        version--;
-        attempt--;
-        continue;
+      if (!res.ok && res.status !== 429 && res.status < 500) {
+        const body = await res.text().catch(() => '');
+        const err = new HttpError(res.status, url, body);
+        err.versionError = isVersionError(res.status, body);
+        throw err;
       }
       if (res.status === 429 || res.status >= 500) {
         const ra = Number(res.headers.get('retry-after'));
@@ -80,12 +120,11 @@ async function doGet(url, xv, xmin) {
         await sleep(ra > 0 ? Math.min(ra, 60) * 1000 : 1000 * 2 ** attempt);
         continue;
       }
-      if (!res.ok) throw new HttpError(res.status, url, await res.text().catch(() => ''));
       const json = await res.json();
       return { json, version: res.headers.get('x-v') || String(version) };
     } catch (err) {
       lastErr = err;
-      if (err instanceof HttpError && err.status < 500 && err.status !== 429) break;
+      if (err instanceof HttpError && err.status < 500 && err.status !== 429) throw err;
       if (attempt < config.retries) {
         stats.retries++;
         await sleep(1000 * 2 ** attempt);
@@ -94,7 +133,6 @@ async function doGet(url, xv, xmin) {
       clearTimeout(timer);
     }
   }
-  stats.failures++;
   throw lastErr;
 }
 
