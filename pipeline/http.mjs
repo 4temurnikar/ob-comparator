@@ -2,7 +2,7 @@ import { config } from './config.mjs';
 
 export class HttpError extends Error {
   constructor(status, url, body) {
-    super(`HTTP ${status} for ${url}${body ? ` — ${body.slice(0, 200)}` : ''}`);
+    super(`HTTP ${status} for ${url}${body ? ` — ${body.replace(/\s+/g, ' ').slice(0, 500)}` : ''}`);
     this.status = status;
     this.url = url;
   }
@@ -35,6 +35,14 @@ function hostLimit(url) {
   const host = new URL(url).host;
   if (!hostLimits.has(host)) hostLimits.set(host, semaphore(config.perHostConcurrency));
   return hostLimits.get(host);
+}
+
+// Turn Node's vague "fetch failed" into something diagnosable (DNS, TLS, refused, timeout…)
+function describeNetworkError(err, url) {
+  if (err?.name === 'AbortError') return Object.assign(new Error(`Timed out after ${config.timeoutMs / 1000}s for ${url}`), { status: null });
+  const c = err?.cause;
+  const detail = c ? [c.code, c.reason || c.message].filter(Boolean).join(': ') : '';
+  return Object.assign(new Error(`${err?.message || 'Network error'}${detail ? ` (${detail})` : ''} for ${url}`), { status: null });
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -123,7 +131,7 @@ async function attemptGet(url, { xv: version, xmin }) {
       const json = await res.json();
       return { json, version: res.headers.get('x-v') || String(version) };
     } catch (err) {
-      lastErr = err;
+      lastErr = err instanceof HttpError ? err : describeNetworkError(err, url);
       if (err instanceof HttpError && err.status < 500 && err.status !== 429) throw err;
       if (attempt < config.retries) {
         stats.retries++;
