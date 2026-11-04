@@ -43,7 +43,8 @@ jobs:
             echo "No data changes"
           else
             git commit -m "Data refresh $(date -u +%Y-%m-%d)"
-            git pull --rebase origin main
+            # Pick up anything pushed during the run; keep the fresh data if both changed
+            git pull --rebase -X theirs origin main
             git push
           fi
 
