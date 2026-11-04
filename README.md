@@ -26,7 +26,7 @@ site/data/*.json ──► static website (GitHub Pages), rebuilt daily
 | Folder | What's in it |
 |---|---|
 | `pipeline/config.mjs` | Endpoints, API versions, concurrency, comparison scenarios (LVR, balance, terms) |
-| `pipeline/http.mjs` | `x-v`/`x-min-v` negotiation (steps down on 406), retries with backoff, `Retry-After`, per-host and global rate limits |
+| `pipeline/http.mjs` | `x-v`/`x-min-v` negotiation (range first, then exact versions newest-first, remembered per host), retries with backoff, `Retry-After`, per-host and global rate limits, descriptive network errors |
 | `pipeline/fetch.mjs` | CDR Register discovery, product list paging, product detail fetch; one failing bank never breaks the run |
 | `pipeline/normalise.mjs` | Flattens `lendingRates`/`depositRates`/tiers/fees; parses ISO-8601 durations; flags non-conformant data |
 | `pipeline/insights.mjs` | Leaderboards and narrative insights; rate-change diff |
@@ -87,12 +87,31 @@ Change any of these in `pipeline/config.mjs`.
 
 ## Known real-world quirks handled
 
-- Holders that don't honour `x-min-v` (we step the version down on HTTP 406)
+- Holders that don't honour `x-min-v` ranges or only serve one exact version (e.g. ANZ on v5)
 - Rejected `page-size` (retries with defaults) and repeated items across pages
 - LVR tiers published as fractions (0.8) vs percentages (80)
 - Rates published as percentages instead of decimals (corrected and flagged)
 - Several brands sharing one base URI
 - Throttling (honours `Retry-After`), slow or dead endpoints (timeouts, isolated failures)
+
+## Known holder-side failures (Nov 2026)
+
+These are the data holders' problems, not the pipeline's. The daily run retries them automatically and lists them on the Data quality tab.
+
+| Brand | Error | Meaning |
+|---|---|---|
+| DDH Graham | 401 | Public product endpoint requires authentication (non-conformant) |
+| IMB Bank | 502 | Bad gateway at the holder |
+| Geelong Bank | 520 | Origin error behind Cloudflare |
+| Aussie Home Loans | 404 | Registered base URI has no products endpoint |
+| Thriday | fetch failed | Connection-level failure; cause logged from next run |
+| Wise | 422 | Request rejected; full error needed to diagnose |
+
+CBA - CommBiz and HSBC respond but publish no products (flagged as `NO_PRODUCTS`).
+
+## Daily job notes
+
+The commit step never merges data: it sets the fresh data aside, syncs to the latest `main`, puts the data back and pushes (retrying on races). Start manual runs with **Run workflow**, not **Re-run jobs**, because a re-run reuses the workflow file from the original commit.
 
 ## Disclaimer
 
