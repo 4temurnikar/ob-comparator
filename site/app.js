@@ -500,7 +500,7 @@ renderers.quality = () => {
         key: 'detail',
         label: 'What we found',
         fmt: (b) =>
-          b.q ? `<ul class="issue-list">${b.q.issues.map((i) => `<li><b>${i.count}×</b> ${esc(i.label)} <code>${esc(i.code)}</code>${i.examples[0]?.product ? ` — e.g. ${esc(i.examples[0].product)}` : ''}${i.examples[0]?.value && i.code !== 'LIST_FAILED' ? ` <code>${esc(String(i.examples[0].value).slice(0, 60))}</code>` : ''}${i.code === 'LIST_FAILED' ? ` <span class="small muted">${esc(String(i.examples[0]?.value || '').slice(0, 120))}</span>` : ''}</li>`).join('')}</ul>` : '<span class="status-ok">No issues</span>',
+          b.q ? `<ul class="issue-list">${b.q.issues.map((i) => `<li><b>${i.count}×</b> ${esc(i.label)} <code>${esc(i.code)}</code>${i.examples[0]?.product ? ` — e.g. ${esc(i.examples[0].product)}` : ''}${i.examples[0]?.value && i.code !== 'LIST_FAILED' ? ` <code>${esc(String(i.examples[0].value).slice(0, 60))}</code>` : ''}${i.code === 'LIST_FAILED' ? ` <span class="small muted">${esc(String(i.examples[0]?.value || '').slice(0, 400))}</span>` : ''}</li>`).join('')}</ul>` : '<span class="status-ok">No issues</span>',
         sort: (b) => b.total,
       },
     ],
