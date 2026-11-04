@@ -66,41 +66,72 @@ function renderAll() {
 }
 // Each menu address maps to a page section; banking product pages share sections and set a mode.
 const ROUTES = {
-  home: { tab: 'insights' },
+  home: { tab: 'insights', section: 'top' },
+  how: { tab: 'insights', section: 'sec-how' },
+  insights: { tab: 'insights', section: 'sec-insights' },
+  quality: { tab: 'insights', section: 'sec-quality' },
+  about: { tab: 'insights', section: 'sec-about' },
+  'all-insights': { tab: 'rankings', nav: 'insights' },
+  'data-quality': { tab: 'quality', nav: 'quality' },
+  methodology: { tab: 'about', nav: 'about' },
   'home-loans': { tab: 'home', group: 'banking' },
   savings: { tab: 'deposits', group: 'banking', apply: () => setDepMode('savings') },
   'term-deposits': { tab: 'deposits', group: 'banking', apply: () => setDepMode('td') },
   'credit-cards': { tab: 'cards', group: 'banking', apply: () => setCpMode('cards') },
   'personal-loans': { tab: 'cards', group: 'banking', apply: () => setCpMode('pl') },
   products: { tab: 'all', group: 'banking' },
-  insights: { tab: 'rankings' },
-  quality: { tab: 'quality' },
-  about: { tab: 'about' },
 };
-const LEGACY = { '': 'home', deposits: 'savings', cards: 'credit-cards', all: 'products', rankings: 'insights' };
+const LEGACY = { '': 'home', deposits: 'savings', cards: 'credit-cards', all: 'products', rankings: 'all-insights' };
 function route() {
   let name = location.hash.slice(1);
   name = LEGACY[name] ?? name;
   if (!ROUTES[name]) name = 'home';
   const r = ROUTES[name];
   document.querySelectorAll('.tab').forEach((s) => (s.hidden = s.id !== `tab-${r.tab}`));
-  document.querySelectorAll('#menu a[href]').forEach((a) => {
-    if (a.getAttribute('href') === `#${name}`) a.setAttribute('aria-current', 'page');
-    else a.removeAttribute('aria-current');
-  });
+  setNav(r.nav || name);
   document.querySelectorAll('.menu-trigger').forEach((t) => t.classList.toggle('active', t.dataset.group === r.group));
   if (D.meta) r.apply?.();
   closeMenus();
+  if (r.section && r.section !== 'top') requestAnimationFrame(() => document.getElementById(r.section)?.scrollIntoView({ behavior: 'smooth' }));
+  else window.scrollTo({ top: 0 });
+}
+function setNav(name) {
+  document.querySelectorAll('#menu > a[href]').forEach((a) => {
+    if (a.getAttribute('href') === `#${name}`) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
+  });
+  document.querySelectorAll('#menu .menu-panel a').forEach((a) => {
+    if (a.getAttribute('href') === `#${name}`) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
+  });
 }
 function go(name) {
   if (location.hash === `#${name}`) route();
   else location.hash = name;
-  window.scrollTo({ top: 0 });
 }
-window.addEventListener('hashchange', () => {
-  route();
-  window.scrollTo({ top: 0 });
+window.addEventListener('hashchange', route);
+// Clicking the link you're already on (e.g. Insights twice) should still scroll to it.
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a[href^="#"]');
+  if (a && a.getAttribute('href') === location.hash) {
+    e.preventDefault();
+    route();
+  }
 });
+// Highlight the menu item for the home-page section in view.
+function watchSections() {
+  if (!('IntersectionObserver' in window)) return;
+  const map = { 'sec-hero': 'home', 'sec-how': 'home', 'sec-insights': 'insights', 'sec-quality': 'quality', 'sec-about': 'about' };
+  const io = new IntersectionObserver(
+    (entries) => {
+      if ($('#tab-insights').hidden) return;
+      const vis = entries.filter((e) => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+      if (vis) setNav(map[vis.target.id]);
+    },
+    { rootMargin: '-35% 0px -55% 0px' }
+  );
+  Object.keys(map).forEach((id) => document.getElementById(id) && io.observe(document.getElementById(id)));
+}
 
 // Dropdown menus
 function closeMenus(except) {
@@ -194,73 +225,128 @@ const outlierTag = '<span class="tag warn" title="Far from the typical rate. Usu
 // Outliers sort after normal rows when sorting by rate, so they never top the table.
 const rateSort = (get, dir) => (r) => (r.outlier ? (dir === 'asc' ? 1000 : -1000) : 0) + get(r);
 
-// ---------- OVERVIEW (front page: deliberately short)
-const LEDGER = [
-  { board: 'hl-oo-pi-var', name: 'Home loan to live in', scn: 'Variable, principal & interest, 80% LVR' },
-  { board: 'hl-inv-pi-var', name: 'Investment home loan', scn: 'Variable, principal & interest, 80% LVR' },
-  { board: 'td-12', name: '1-year term deposit', scn: 'On a $10,000 deposit' },
-  { board: 'sav-total', name: 'Savings account', scn: 'Including bonus interest, $10,000 balance' },
+// ---------- HOME (one long page; the menu scrolls to its sections)
+const BEST = [
+  { board: 'hl-oo-pi-var', label: 'Home loan', note: 'To live in, variable, principal & interest, 80% LVR', link: 'home-loans' },
+  { board: 'hl-inv-pi-var', label: 'Investment loan', note: 'Variable, principal & interest, 80% LVR', link: 'home-loans' },
+  { board: 'hl-oo-pi-fix24', label: '2-year fixed', note: 'To live in, principal & interest, 80% LVR', link: 'home-loans' },
+  { board: 'td-12', label: 'Term deposit', note: '12 months on a $10,000 deposit', link: 'term-deposits' },
+  { board: 'sav-total', label: 'Savings', note: 'Including bonus interest, $10,000 balance', link: 'savings' },
 ];
 const FEATURED = ['cross-var', 'investor-premium', 'fixed-vs-variable', 'offset-cost', 'savings-bonus', 'td-best', 'lvr-reward', 'card-fee'];
+let bestSeg = 0;
 
 renderers.insights = () => {
   const el = $('#tab-insights');
   const boards = new Map((D.boards || []).map((b) => [b.id, b]));
+  const segs = BEST.map((x) => ({ ...x, b: boards.get(x.board) })).filter((x) => x.b?.n);
   const ins = D.insights || [];
-  const featured = FEATURED.map((id) => ins.find((i) => i.id === id)).filter(Boolean).slice(0, 3);
+  const featured = FEATURED.map((id) => ins.find((i) => i.id === id)).filter(Boolean).slice(0, 4);
   const run = D.changes?.runs?.[0];
-  const rows = LEDGER.map((l) => ({ ...l, b: boards.get(l.board) })).filter((l) => l.b?.n);
+  const brands = D.brands || [];
+  const failing = brands.filter((b) => !b.ok).length;
+  const issueTotal = (D.quality || []).reduce((a, q) => a + q.total, 0);
+  const byCode = {};
+  for (const q of D.quality || []) for (const i of q.issues) (byCode[i.code] ??= { label: i.label, n: 0, brands: 0 }), (byCode[i.code].n += i.count), byCode[i.code].brands++;
+  const topIssues = Object.values(byCode).sort((a, b) => b.brands - a.brands || b.n - a.n).slice(0, 4);
+  const n = D.meta.brandsOk;
+
   el.innerHTML = `
-    <section class="hero">
-      <h2 class="hero-title">The best published rates from ${D.meta.brandsOk} Australian banks and lenders, checked every morning.</h2>
-      <p class="hero-sub">Taken directly from each bank's official Open Banking data. Nobody pays to be listed or ranked.</p>
+    <section class="hero" id="sec-hero">
+      <h2 class="display">${n} banks.<br />One honest comparison.</h2>
+      <p class="lede">Every morning we read each Australian bank's official Open Banking data and show who is cheapest for your situation. Nobody pays to be listed or ranked.</p>
+      <div class="cta">
+        <a class="btn-primary" href="#home-loans">Compare home loans</a>
+        <a class="btn-ghost" href="#how">How it works</a>
+      </div>
+
+      ${segs.length ? `<div class="board-card">
+        <div class="board-bar"><span class="board-title">Today's best rates</span><span class="board-live"><span class="live-dot"></span>From this morning's data</span></div>
+        <div class="seg-tabs" role="tablist" aria-label="Product">${segs.map((x, i) => `<button role="tab" data-i="${i}" aria-selected="${i === bestSeg}">${esc(x.label)}</button>`).join('')}</div>
+        <div id="best-list"></div>
+      </div>` : ''}
     </section>
 
-    <section class="block">
-      <h2 class="block-title">Today's best rates</h2>
-      <div class="ledger">${rows
-        .map((l) => {
-          const top = l.b.ranking[0];
-          const [whole, frac] = top.rate.toFixed(2).split('.');
-          return `<button class="ledger-row" data-k="${esc(top.key)}">
-            <span class="l-what"><span class="l-name">${esc(l.name)}</span><span class="l-scn">${esc(l.scn)}</span></span>
-            <span class="l-who"><span class="l-bank">${esc(top.brand)}</span><span class="l-prod">${esc(top.product)}</span></span>
-            <span class="l-fig"><span class="l-rate">${whole}<span class="l-frac">.${frac}</span><span class="l-pct">%</span></span>
-              <span class="l-note">${top.comp ? `Comparison rate ${pct(top.comp)}` : `Typical: ${pct(l.b.median)}`}</span></span>
-          </button>`;
-        })
-        .join('')}</div>
-      <p class="block-foot">
-        <button class="textbtn" data-goto="home-loans">Compare home loans</button>
-        <button class="textbtn" data-goto="savings">Compare savings accounts</button>
-        <button class="textbtn" data-goto="term-deposits">Compare term deposits</button>
-      </p>
+    <section class="section" id="sec-how">
+      <h2 class="section-title">How it works</h2>
+      <p class="section-lede">Banks have to publish their products through the Consumer Data Right. We turn that raw data into a comparison you can trust.</p>
+      <ol class="steps">
+        <li class="step"><span class="step-n">1</span><h3>Read every bank's own data</h3><p>Each morning we call the public product APIs of all ${D.meta.brandsTotal} registered banks and brands, covering ${D.meta.products.toLocaleString('en-AU')} products and ${D.meta.rates.toLocaleString('en-AU')} rates.</p></li>
+        <li class="step"><span class="step-n">2</span><h3>Compare like with like</h3><p>Rates are matched on what changes your price: owner-occupied or investment, repayment type, fixed term, deposit size and balance. Business, staff-only and special-purpose products are set aside.</p></li>
+        <li class="step"><span class="step-n">3</span><h3>Explain what it means</h3><p>We pick out the leaders, the gaps between lenders and every rate that moved since the previous morning, in plain English.</p></li>
+      </ol>
     </section>
 
-    ${featured.length ? `<section class="block">
-      <h2 class="block-title">What stands out</h2>
-      <div class="notes">${featured.map((i) => `<article class="note"><h3>${esc(i.headline)}</h3><p>${esc(i.detail)}</p></article>`).join('')}</div>
-      <p class="block-foot"><button class="textbtn" data-goto="insights">See all insights</button></p>
-    </section>` : ''}
+    <section class="section" id="sec-insights">
+      <h2 class="section-title">What the data shows today</h2>
+      <p class="section-lede">Worked out automatically from this morning's rates.</p>
+      <div class="insight-grid">${featured.map((i) => `<article class="insight"><h3>${esc(i.headline)}</h3><p>${esc(i.detail)}</p></article>`).join('')}</div>
+      <div class="changes-box">
+        <h3>Changed since the last check</h3>
+        ${run?.count
+          ? `<p class="muted">${run.count} published rate${run.count > 1 ? 's' : ''} changed: ${(() => { const up = run.changes.filter((c) => c.delta > 0).length; return `${up} went up and ${run.changes.length - up} went down`; })()}.</p>
+             <ul class="changes">${run.changes
+               .slice(0, 4)
+               .map((c) => `<li><button class="change-row" data-k="${esc(c.k)}"><span><b>${esc(c.brand)}</b> ${esc(c.product)}<span class="c-what">${esc(changeDesc(c))}</span></span><span class="c-fig">${pct(c.from)} to <b class="${c.delta > 0 ? 'up' : 'down'}">${pct(c.to)}</b></span></button></li>`)
+               .join('')}</ul>`
+          : `<p class="muted">No published rates changed since the previous check.</p>`}
+      </div>
+      <p class="section-foot"><a class="btn-ghost" href="#all-insights">See all insights and rankings</a></p>
+    </section>
 
-    <section class="block">
-      <h2 class="block-title">Changed since the last check</h2>
-      ${run?.count
-        ? `<p class="muted">${run.count} published rate${run.count > 1 ? 's' : ''} changed: ${(() => { const up = run.changes.filter((c) => c.delta > 0).length; return `${up} went up and ${run.changes.length - up} went down`; })()}.</p>
-           <ul class="changes">${run.changes
-             .slice(0, 3)
-             .map((c) => `<li><button class="change-row" data-k="${esc(c.k)}"><span><b>${esc(c.brand)}</b> ${esc(c.product)}<span class="c-what">${esc(changeDesc(c))}</span></span><span class="c-fig">${pct(c.from)} <span aria-hidden="true">to</span> <b class="${c.delta > 0 ? 'up' : 'down'}">${pct(c.to)}</b></span></button></li>`)
-             .join('')}</ul>
-           ${run.count > 3 ? `<p class="block-foot"><button class="textbtn" data-goto="insights" data-anchor="changes">See every change</button></p>` : ''}`
-        : `<p class="muted">No published rates changed since the previous check.</p>`}
+    <section class="section" id="sec-quality">
+      <h2 class="section-title">How good is the banks' data?</h2>
+      <p class="section-lede">Banks must keep the product data they publish accurate and up to date. We check every endpoint each morning and record what's missing or wrong.</p>
+      <div class="stat-grid">
+        <div class="bigstat accent"><span class="bs-n">${issueTotal.toLocaleString('en-AU')}</span><span class="bs-l">data-quality issues found this morning, across ${(D.quality || []).length} banks and brands</span></div>
+        <div class="bigstat"><span class="bs-n">${brands.length - failing}<small>/${brands.length}</small></span><span class="bs-l">product endpoints responding</span></div>
+        <div class="bigstat"><span class="bs-n">${D.meta.products.toLocaleString('en-AU')}</span><span class="bs-l">products checked</span></div>
+        <div class="bigstat"><span class="bs-n">${failing}</span><span class="bs-l">banks we couldn't read today</span></div>
+        <div class="bigstat"><span class="bs-n">${D.meta.rates.toLocaleString('en-AU')}</span><span class="bs-l">rates compared</span></div>
+      </div>
+      ${topIssues.length ? `<h3 class="sub-title">Most common problems</h3>
+      <ul class="issue-rows">${topIssues.map((i) => `<li><span>${esc(i.label)}</span><span class="muted">${i.brands} bank${i.brands > 1 ? 's' : ''}, ${i.n.toLocaleString('en-AU')} instance${i.n > 1 ? 's' : ''}</span></li>`).join('')}</ul>` : ''}
+      <p class="section-foot"><a class="btn-ghost" href="#data-quality">Open the full data-quality report</a></p>
+    </section>
+
+    <section class="section" id="sec-about">
+      <h2 class="section-title">About</h2>
+      <p class="section-lede">Open Banking Comparator is independent. It isn't owned by or affiliated with any bank, and no bank can pay to change where it appears.</p>
+      <div class="faq">
+        <details><summary>Where does the data come from?</summary><p>From each bank's own product APIs, published under the Consumer Data Right and listed on the official CDR Register. We don't use paid feeds or screen-scraping.</p></details>
+        <details><summary>How often is it updated?</summary><p>Every morning at about 4:20 am Melbourne time. The time of the latest update is shown at the top of every page.</p></details>
+        <details><summary>Why might the rate I'm offered be different?</summary><p>Banks publish their advertised rates. Your rate can depend on your deposit, income, credit history and negotiation, and tailored products are priced individually. Always confirm with the bank.</p></details>
+        <details><summary>Why is a bank missing or out of date?</summary><p>Some banks' endpoints were down or returned errors this morning. They're listed in the data-quality report and are picked up again automatically when they recover.</p></details>
+        <details><summary>Is this financial advice?</summary><p>No. It's general information to help you compare published products. It doesn't take your circumstances into account. Check the product disclosure documents before you decide.</p></details>
+      </div>
+      <p class="section-foot"><a class="btn-ghost" href="#methodology">Read the full methodology</a></p>
     </section>`;
-  el.querySelectorAll('[data-k]').forEach((b) => b.addEventListener('click', () => openProduct(b.dataset.k)));
-  el.querySelectorAll('[data-goto]').forEach((b) =>
+
+  const drawBest = () => {
+    const x = segs[bestSeg];
+    if (!x) return;
+    const list = $('#best-list', el);
+    const top = x.b.ranking.slice(0, 5);
+    list.innerHTML = `<p class="board-note">${esc(x.note)}</p>
+      <ol class="best-rows">${top
+        .map((r, i) => {
+          const [w, f] = r.rate.toFixed(2).split('.');
+          return `<li><button class="best-row ${i === 0 ? 'is-top' : ''}" data-k="${esc(r.key)}"><span class="br-rank">${i + 1}</span><span class="br-who"><b>${esc(r.brand)}</b><span>${esc(r.product)}</span></span><span class="br-rate">${w}<span class="br-frac">.${f}%</span></span></button></li>`;
+        })
+        .join('')}</ol>
+      <div class="board-foot"><span class="muted">Typical rate across ${x.b.n} lenders: <b>${pct(x.b.median)}</b></span><a href="#${x.link}">Compare all</a></div>`;
+    list.querySelectorAll('[data-k]').forEach((b) => b.addEventListener('click', () => openProduct(b.dataset.k)));
+  };
+  el.querySelectorAll('.seg-tabs button').forEach((b) =>
     b.addEventListener('click', () => {
-      go(b.dataset.goto);
-      if (b.dataset.anchor) setTimeout(() => $(`#${b.dataset.anchor}`)?.scrollIntoView(), 0);
+      bestSeg = +b.dataset.i;
+      el.querySelectorAll('.seg-tabs button').forEach((t) => t.setAttribute('aria-selected', String(t === b)));
+      drawBest();
     })
   );
+  drawBest();
+  el.querySelectorAll('.change-row[data-k]').forEach((b) => b.addEventListener('click', () => openProduct(b.dataset.k)));
+  watchSections();
 };
 
 // ---------- RANKINGS (full detail lives here)
@@ -270,7 +356,7 @@ renderers.rankings = () => {
   const groups = [...new Set(ins.map((i) => i.group))];
   const boards = D.boards || [];
   el.innerHTML = `
-    <h2 class="page-title">Insights</h2>
+    <h2 class="page-title">All insights</h2>
     <p class="muted">What the published rates show today, worked out automatically each morning.</p>
     ${groups
       .map(
@@ -662,6 +748,7 @@ renderers.quality = () => {
 // ---------- ABOUT
 renderers.about = () => {
   $('#tab-about').innerHTML = `<div class="about">
+    <h2 class="page-title">Methodology</h2>
     <h2>How this works</h2>
     <p>Every day, a scheduled job reads the <a href="https://www.cdr.gov.au/" target="_blank" rel="noopener">CDR Register</a> to find every banking data holder brand and its public base URI, then calls each one's unauthenticated Product Reference APIs \u2014 <code>GET /banking/products</code> and <code>GET /banking/products/{productId}</code> \u2014 as defined in the <a href="https://consumerdatastandardsaustralia.github.io/standards/" target="_blank" rel="noopener">Consumer Data Standards</a>.</p>
     <p>Rates, fees, features, eligibility and constraints are normalised so like can be compared with like: lending rates are split by loan purpose, repayment type, fixed term and LVR band; deposit rates by term and balance tier. Insights are generated automatically from the rankings.</p>
