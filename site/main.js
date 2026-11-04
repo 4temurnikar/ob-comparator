@@ -57,24 +57,76 @@ async function load() {
   const ageH = (Date.now() - at) / 36e5;
   $('#freshness').innerHTML = `<span class="dot ${ageH > 36 ? 'stale' : ''}"></span>Updated ${esc(at.toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }))}`;
   renderAll();
-  selectTab(location.hash.slice(1) || 'insights');
+  route();
 }
 
 const renderers = {};
 function renderAll() {
   for (const k of Object.keys(renderers)) renderers[k]();
 }
-function selectTab(id) {
-  if (!renderers[id]) id = 'insights';
-  document.querySelectorAll('#tabs button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === id)));
-  document.querySelectorAll('.tab').forEach((s) => (s.hidden = s.id !== `tab-${id}`));
-  if (location.hash.slice(1) !== id) history.replaceState(null, '', `#${id}`);
+// Each menu address maps to a page section; banking product pages share sections and set a mode.
+const ROUTES = {
+  home: { tab: 'insights' },
+  'home-loans': { tab: 'home', group: 'banking' },
+  savings: { tab: 'deposits', group: 'banking', apply: () => setDepMode('savings') },
+  'term-deposits': { tab: 'deposits', group: 'banking', apply: () => setDepMode('td') },
+  'credit-cards': { tab: 'cards', group: 'banking', apply: () => setCpMode('cards') },
+  'personal-loans': { tab: 'cards', group: 'banking', apply: () => setCpMode('pl') },
+  products: { tab: 'all', group: 'banking' },
+  insights: { tab: 'rankings' },
+  quality: { tab: 'quality' },
+  about: { tab: 'about' },
+};
+const LEGACY = { '': 'home', deposits: 'savings', cards: 'credit-cards', all: 'products', rankings: 'insights' };
+function route() {
+  let name = location.hash.slice(1);
+  name = LEGACY[name] ?? name;
+  if (!ROUTES[name]) name = 'home';
+  const r = ROUTES[name];
+  document.querySelectorAll('.tab').forEach((s) => (s.hidden = s.id !== `tab-${r.tab}`));
+  document.querySelectorAll('#menu a[href]').forEach((a) => {
+    if (a.getAttribute('href') === `#${name}`) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
+  });
+  document.querySelectorAll('.menu-trigger').forEach((t) => t.classList.toggle('active', t.dataset.group === r.group));
+  if (D.meta) r.apply?.();
+  closeMenus();
 }
-$('#tabs').addEventListener('click', (e) => {
-  const b = e.target.closest('button[data-tab]');
-  if (b) {
-    selectTab(b.dataset.tab);
-    window.scrollTo({ top: 0 });
+function go(name) {
+  if (location.hash === `#${name}`) route();
+  else location.hash = name;
+  window.scrollTo({ top: 0 });
+}
+window.addEventListener('hashchange', () => {
+  route();
+  window.scrollTo({ top: 0 });
+});
+
+// Dropdown menus
+function closeMenus(except) {
+  document.querySelectorAll('.menu-trigger').forEach((t) => {
+    if (t === except) return;
+    t.setAttribute('aria-expanded', 'false');
+    document.getElementById(t.getAttribute('aria-controls')).hidden = true;
+  });
+}
+document.querySelectorAll('.menu-trigger').forEach((t) =>
+  t.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const panel = document.getElementById(t.getAttribute('aria-controls'));
+    const open = t.getAttribute('aria-expanded') === 'true';
+    closeMenus(t);
+    t.setAttribute('aria-expanded', String(!open));
+    panel.hidden = open;
+  })
+);
+document.addEventListener('click', (e) => !e.target.closest('.menu-group') && closeMenus());
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const open = document.querySelector('.menu-trigger[aria-expanded="true"]');
+  if (open) {
+    closeMenus();
+    open.focus();
   }
 });
 
@@ -125,10 +177,10 @@ const changeDesc = (c) =>
 
 // ---------- OVERVIEW (front page: deliberately short)
 const LEDGER = [
-  { board: 'hl-oo-pi-var', name: 'Home loan to live in', scn: 'Variable, principal & interest, 80% LVR', tab: 'home' },
-  { board: 'hl-inv-pi-var', name: 'Investment home loan', scn: 'Variable, principal & interest, 80% LVR', tab: 'home' },
-  { board: 'td-12', name: '1-year term deposit', scn: 'On a $10,000 deposit', tab: 'deposits' },
-  { board: 'sav-total', name: 'Savings account', scn: 'Including bonus interest, $10,000 balance', tab: 'deposits' },
+  { board: 'hl-oo-pi-var', name: 'Home loan to live in', scn: 'Variable, principal & interest, 80% LVR' },
+  { board: 'hl-inv-pi-var', name: 'Investment home loan', scn: 'Variable, principal & interest, 80% LVR' },
+  { board: 'td-12', name: '1-year term deposit', scn: 'On a $10,000 deposit' },
+  { board: 'sav-total', name: 'Savings account', scn: 'Including bonus interest, $10,000 balance' },
 ];
 const FEATURED = ['cross-var', 'investor-premium', 'fixed-vs-variable', 'offset-cost', 'savings-bonus', 'td-best', 'lvr-reward', 'card-fee'];
 
@@ -160,15 +212,16 @@ renderers.insights = () => {
         })
         .join('')}</div>
       <p class="block-foot">
-        <button class="textbtn" data-goto="home">Compare all home loans</button>
-        <button class="textbtn" data-goto="deposits">Compare savings and term deposits</button>
+        <button class="textbtn" data-goto="home-loans">Compare home loans</button>
+        <button class="textbtn" data-goto="savings">Compare savings accounts</button>
+        <button class="textbtn" data-goto="term-deposits">Compare term deposits</button>
       </p>
     </section>
 
     ${featured.length ? `<section class="block">
       <h2 class="block-title">What stands out</h2>
       <div class="notes">${featured.map((i) => `<article class="note"><h3>${esc(i.headline)}</h3><p>${esc(i.detail)}</p></article>`).join('')}</div>
-      <p class="block-foot"><button class="textbtn" data-goto="rankings">See all insights and rankings</button></p>
+      <p class="block-foot"><button class="textbtn" data-goto="insights">See all insights</button></p>
     </section>` : ''}
 
     <section class="block">
@@ -179,15 +232,14 @@ renderers.insights = () => {
              .slice(0, 3)
              .map((c) => `<li><button class="change-row" data-k="${esc(c.k)}"><span><b>${esc(c.brand)}</b> ${esc(c.product)}<span class="c-what">${esc(changeDesc(c))}</span></span><span class="c-fig">${pct(c.from)} <span aria-hidden="true">to</span> <b class="${c.delta > 0 ? 'up' : 'down'}">${pct(c.to)}</b></span></button></li>`)
              .join('')}</ul>
-           ${run.count > 3 ? `<p class="block-foot"><button class="textbtn" data-goto="rankings" data-anchor="changes">See every change</button></p>` : ''}`
+           ${run.count > 3 ? `<p class="block-foot"><button class="textbtn" data-goto="insights" data-anchor="changes">See every change</button></p>` : ''}`
         : `<p class="muted">No published rates changed since the previous check.</p>`}
     </section>`;
   el.querySelectorAll('[data-k]').forEach((b) => b.addEventListener('click', () => openProduct(b.dataset.k)));
   el.querySelectorAll('[data-goto]').forEach((b) =>
     b.addEventListener('click', () => {
-      selectTab(b.dataset.goto);
-      if (b.dataset.anchor) $(`#${b.dataset.anchor}`)?.scrollIntoView();
-      else window.scrollTo({ top: 0 });
+      go(b.dataset.goto);
+      if (b.dataset.anchor) setTimeout(() => $(`#${b.dataset.anchor}`)?.scrollIntoView(), 0);
     })
   );
 };
@@ -199,14 +251,8 @@ renderers.rankings = () => {
   const groups = [...new Set(ins.map((i) => i.group))];
   const boards = D.boards || [];
   el.innerHTML = `
-    <h2 class="page-title">Rankings</h2>
-    <p class="muted">Each lender's best published rate in the chosen category. Tailored products are left out because their rate depends on the applicant.</p>
-    <div class="board-head"><label class="field">Category<select id="board-select">${[...new Set(boards.map((b) => b.group))]
-      .map((g) => `<optgroup label="${esc(g)}">${boards.filter((b) => b.group === g).map((b) => `<option value="${esc(b.id)}">${esc(b.label)}, ${esc(b.scenario)} (${b.n} lenders)</option>`).join('')}</optgroup>`)
-      .join('')}</select></label></div>
-    <div id="board"></div>
-
-    <h2 class="page-title">All insights</h2>
+    <h2 class="page-title">Insights</h2>
+    <p class="muted">What the published rates show today, worked out automatically each morning.</p>
     ${groups
       .map(
         (g) => `<h3 class="group-title">${esc(g)}</h3><div class="notes">${ins
@@ -216,6 +262,14 @@ renderers.rankings = () => {
       )
       .join('')}
 
+
+    <h2 class="page-title" id="rankings">Rankings</h2>
+    <p class="muted">Each lender's best published rate in the chosen category. Tailored products are left out because their rate depends on the applicant.</p>
+    <div class="board-head"><label class="field">Category<select id="board-select">${[...new Set(boards.map((b) => b.group))]
+      .map((g) => `<optgroup label="${esc(g)}">${boards.filter((b) => b.group === g).map((b) => `<option value="${esc(b.id)}">${esc(b.label)}, ${esc(b.scenario)} (${b.n} lenders)</option>`).join('')}</optgroup>`)
+      .join('')}</select></label></div>
+    <div id="board"></div>
+
     <h2 class="page-title" id="changes">Rate changes</h2>
     <div id="changes-list"></div>`;
   const sel = $('#board-select', el);
@@ -224,7 +278,7 @@ renderers.rankings = () => {
     b.addEventListener('click', () => {
       sel.value = b.dataset.board;
       drawBoard(sel.value);
-      $('#board-select').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      $('#rankings').scrollIntoView({ behavior: 'smooth' });
     })
   );
   if (boards.length) drawBoard(boards[0].id);
@@ -279,6 +333,8 @@ const hl = { purpose: 'OWNER_OCCUPIED', repay: 'PRINCIPAL_AND_INTEREST', type: '
 renderers.home = () => {
   const el = $('#tab-home');
   el.innerHTML = `
+    <h2 class="page-title">Home loans</h2>
+    <p class="muted">Every lender's published home-loan rates. Set your situation and the table updates.</p>
     <div class="filters" id="hl-f">
       <label class="field">Property use<select data-k="purpose"><option value="OWNER_OCCUPIED">Owner-occupied</option><option value="INVESTMENT">Investment</option></select></label>
       <label class="field">Repayments<select data-k="repay"><option value="PRINCIPAL_AND_INTEREST">Principal &amp; interest</option><option value="INTEREST_ONLY">Interest only</option></select></label>
@@ -346,25 +402,24 @@ const dep = { mode: 'savings', balance: 10000, term: 12, conditions: true, brand
 renderers.deposits = () => {
   const el = $('#tab-deposits');
   el.innerHTML = `
+    <h2 class="page-title" id="dep-title"></h2>
+    <p class="muted" id="dep-intro"></p>
     <div class="filters" id="dep-f">
-      <div class="field">Product<div class="seg" id="dep-mode"><button data-m="savings">Savings accounts</button><button data-m="td">Term deposits</button></div></div>
       <label class="field">Balance<input type="number" data-k="balance" min="0" step="1000" /></label>
       <label class="field" id="dep-term">Term<select data-k="term"><option value="1">1 month</option><option value="3">3 months</option><option value="4">4 months</option><option value="6">6 months</option><option value="9">9 months</option><option value="12">12 months</option><option value="18">18 months</option><option value="24">2 years</option><option value="36">3 years</option><option value="48">4 years</option><option value="60">5 years</option></select></label>
       <label class="field">Provider<select data-k="brand"><option value="">All providers</option>${brandOptions()}</select></label>
       <label class="check" id="dep-cond"><input type="checkbox" data-k="conditions" /> Include bonus rates (conditions apply)</label>
     </div><div id="dep-table"></div>`;
   bindFilters($('#dep-f', el), dep, drawDeposits);
-  $('#dep-mode', el).addEventListener('click', (e) => {
-    const b = e.target.closest('button');
-    if (b) {
-      dep.mode = b.dataset.m;
-      drawDeposits();
-    }
-  });
   drawDeposits();
 };
+function setDepMode(m) {
+  dep.mode = m;
+  drawDeposits();
+}
 function drawDeposits() {
-  document.querySelectorAll('#dep-mode button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.m === dep.mode)));
+  $('#dep-title').textContent = dep.mode === 'td' ? 'Term deposits' : 'Savings accounts';
+  $('#dep-intro').textContent = dep.mode === 'td' ? 'Fixed rates for your balance and term, with the interest you would earn at maturity.' : 'Base, bonus and introductory rates for your balance. Bonus rates come with monthly conditions.';
   $('#dep-term').style.display = dep.mode === 'td' ? '' : 'none';
   $('#dep-cond').style.display = dep.mode === 'savings' ? '' : 'none';
   const el = $('#dep-table');
@@ -430,25 +485,24 @@ const cp = { mode: 'cards', balance: 3000, nofee: false, tailored: true, brand: 
 renderers.cards = () => {
   const el = $('#tab-cards');
   el.innerHTML = `
+    <h2 class="page-title" id="cp-title"></h2>
+    <p class="muted" id="cp-intro"></p>
     <div class="filters" id="cp-f">
-      <div class="field">Product<div class="seg" id="cp-mode"><button data-m="cards">Credit cards</button><button data-m="pl">Personal loans</button></div></div>
       <label class="field" id="cp-bal">Typical balance carried<input type="number" data-k="balance" min="0" step="500" /></label>
       <label class="field">Provider<select data-k="brand"><option value="">All providers</option>${brandOptions()}</select></label>
       <label class="check" id="cp-nofee"><input type="checkbox" data-k="nofee" /> $0 annual fee only</label>
       <label class="check" id="cp-tail"><input type="checkbox" data-k="tailored" /> Include tailored</label>
     </div><div id="cp-table"></div>`;
   bindFilters($('#cp-f', el), cp, drawCards);
-  $('#cp-mode', el).addEventListener('click', (e) => {
-    const b = e.target.closest('button');
-    if (b) {
-      cp.mode = b.dataset.m;
-      drawCards();
-    }
-  });
   drawCards();
 };
+function setCpMode(m) {
+  cp.mode = m;
+  drawCards();
+}
 function drawCards() {
-  document.querySelectorAll('#cp-mode button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.m === cp.mode)));
+  $('#cp-title').textContent = cp.mode === 'pl' ? 'Personal loans' : 'Credit cards';
+  $('#cp-intro').textContent = cp.mode === 'pl' ? 'Advertised starting rates. Most personal loans are priced on your profile, so your rate may be higher.' : 'Purchase rates and fees, with an estimate of what a card costs you each year at your balance.';
   $('#cp-bal').style.display = $('#cp-nofee').style.display = cp.mode === 'cards' ? '' : 'none';
   const el = $('#cp-table');
   const cat = cp.mode === 'cards' ? 'CRED_AND_CHRG_CARDS' : 'PERS_LOANS';
@@ -507,6 +561,8 @@ renderers.all = () => {
   const el = $('#tab-all');
   const cats = [...new Set(D.products.map((p) => p.category))].sort();
   el.innerHTML = `
+    <h2 class="page-title">All banking products</h2>
+    <p class="muted">Search every product published by every bank, including business and specialist products.</p>
     <div class="filters" id="ap-f">
       <label class="field">Search<input type="search" data-k="q" placeholder="Product, provider or feature\u2026" /></label>
       <label class="field">Category<select data-k="cat"><option value="">All categories</option>${cats.map((c) => `<option value="${esc(c)}">${esc(CAT[c] || c)}</option>`).join('')}</select></label>
@@ -543,7 +599,8 @@ renderers.quality = () => {
   const brands = D.brands || [];
   const failing = brands.filter((b) => !b.ok);
   el.innerHTML = `
-    <p class="lead">How well each data holder's public product data conforms to the Consumer Data Standards \u2014 useful for spotting gaps that affect comparisons, and for holders checking their own implementation.</p>
+    <h2 class="page-title">Data quality</h2>
+    <p class="muted">How well each data holder's public product data conforms to the Consumer Data Standards \u2014 useful for spotting gaps that affect comparisons, and for holders checking their own implementation.</p>
     <div class="stats">
       <div class="stat"><div class="v">${brands.length - failing.length}/${brands.length}</div><div class="l">endpoints responding</div></div>
       <div class="stat"><div class="v">${(D.quality || []).length}</div><div class="l">brands with issues</div></div>

@@ -13,28 +13,40 @@
 <body>
   <header class="top">
     <div class="wrap top-inner">
-      <div class="brandmark">
-        <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><rect x="2" y="14" width="5" height="12" rx="1.5" fill="currentColor" opacity=".45"/><rect x="11.5" y="8" width="5" height="18" rx="1.5" fill="currentColor" opacity=".7"/><rect x="21" y="2" width="5" height="24" rx="1.5" fill="currentColor"/></svg>
-        <div>
-          <h1>Open Banking Comparator</h1>
-          <p class="sub">Independent comparison from official bank data</p>
+      <a class="brandmark" href="#home" aria-label="Open Banking Comparator, home">
+        <svg class="logo" width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+          <defs><clipPath id="logo-left"><circle cx="13" cy="17" r="9.5" /></clipPath></defs>
+          <circle cx="21" cy="17" r="9.5" class="logo-lens" clip-path="url(#logo-left)" />
+          <circle cx="13" cy="17" r="9.5" class="logo-ring" />
+          <circle cx="21" cy="17" r="9.5" class="logo-ring" />
+        </svg>
+        <span class="wordmark"><span class="wm-name">Open Banking Comparator</span><span class="wm-sub">Independent comparison from official bank data</span></span>
+      </a>
+      <nav class="menu" id="menu" aria-label="Main">
+        <a href="#home">Home</a>
+        <div class="menu-group">
+          <button class="menu-trigger" type="button" data-group="banking" aria-expanded="false" aria-controls="menu-banking">
+            Banking
+            <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+          </button>
+          <div class="menu-panel" id="menu-banking" hidden>
+            <a href="#home-loans">Home loans</a>
+            <a href="#savings">Savings accounts</a>
+            <a href="#term-deposits">Term deposits</a>
+            <a href="#credit-cards">Credit cards</a>
+            <a href="#personal-loans">Personal loans</a>
+            <a href="#products" class="menu-all">All banking products</a>
+          </div>
         </div>
-      </div>
-      <div id="freshness" class="freshness" aria-live="polite">Loading data…</div>
+        <a href="#insights">Insights</a>
+        <a href="#quality">Data quality</a>
+        <a href="#about">About</a>
+      </nav>
     </div>
-    <nav class="wrap tabs" role="tablist" id="tabs">
-      <button role="tab" data-tab="insights" aria-selected="true">Overview</button>
-      <button role="tab" data-tab="home">Home loans</button>
-      <button role="tab" data-tab="deposits">Savings &amp; term deposits</button>
-      <button role="tab" data-tab="cards">Cards &amp; personal loans</button>
-      <button role="tab" data-tab="rankings">Rankings</button>
-      <button role="tab" data-tab="all">All products</button>
-      <button role="tab" data-tab="quality">Data quality</button>
-      <button role="tab" data-tab="about">About</button>
-    </nav>
   </header>
 
   <main class="wrap" id="main">
+    <p id="freshness" class="freshness" aria-live="polite">Loading data…</p>
     <section id="tab-insights" class="tab"></section>
     <section id="tab-home" class="tab" hidden></section>
     <section id="tab-deposits" class="tab" hidden></section>
