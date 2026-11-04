@@ -345,34 +345,56 @@ function lower(s) {
 /** Compare today's comparable rates with the previous run's. */
 export function diffRates(prevRates, rates, products) {
   if (!prevRates?.length) return [];
-  const sig = (r) => [r.k, r.kind, r.type, r.purpose, r.repay, r.term, r.lvrMin, r.lvrMax, r.balMin, r.balMax].join('|');
-  const prev = new Map(prevRates.filter((r) => r.comparable).map((r) => [sig(r), r.rate]));
+  // A product can publish several rates that share these fields (e.g. tiers we don't
+  // model, package vs non-package). Group them and compare the sorted sets, so
+  // ordering differences between runs never show up as "changes".
+  const sig = (r) => [r.k, r.kind, r.type, r.purpose, r.repay, r.term, r.lvrMin, r.lvrMax, r.balMin, r.balMax, r.tierNote].join('|');
+  const group = (list) => {
+    const m = new Map();
+    for (const r of list) {
+      if (!r.comparable) continue;
+      const s = sig(r);
+      if (!m.has(s)) m.set(s, { r, vals: [] });
+      m.get(s).vals.push(r.rate);
+    }
+    for (const g of m.values()) g.vals.sort((a, b) => a - b);
+    return m;
+  };
+  const prev = group(prevRates);
+  const cur = group(rates);
   const pmap = new Map(products.map((p) => [p.key, p]));
+  const same = (a, b) => Math.abs(a - b) < 0.0001;
   const changes = [];
-  const seen = new Set();
-  for (const r of rates) {
-    if (!r.comparable) continue;
-    const s = sig(r);
-    if (seen.has(s)) continue;
-    seen.add(s);
+  for (const [s, { r, vals }] of cur) {
     const old = prev.get(s);
-    if (old === undefined || Math.abs(old - r.rate) < 0.0001) continue;
+    if (!old) continue; // new rate, not a change
+    let pairs;
+    if (old.vals.length === vals.length) {
+      if (vals.every((v, i) => same(v, old.vals[i]))) continue;
+      pairs = vals.map((v, i) => [old.vals[i], v]).filter(([a, b]) => !same(a, b));
+    } else {
+      // Different number of rates: compare only the best one (lowest for loans, highest for deposits)
+      const pick = (xs) => (r.kind === 'L' ? xs[0] : xs[xs.length - 1]);
+      if (same(pick(old.vals), pick(vals))) continue;
+      pairs = [[pick(old.vals), pick(vals)]];
+    }
     const p = pmap.get(r.k);
-    changes.push({
-      k: r.k,
-      brandId: p?.brandId,
-      brand: p?.brand,
-      product: p?.name,
-      cat: r.cat,
-      type: r.type,
-      purpose: r.purpose,
-      repay: r.repay,
-      term: r.term,
-      lvrMax: r.lvrMax,
-      from: old,
-      to: r.rate,
-      delta: Math.round((r.rate - old) * 10000) / 10000,
-    });
+    for (const [from, to] of pairs)
+      changes.push({
+        k: r.k,
+        brandId: p?.brandId,
+        brand: p?.brand,
+        product: p?.name,
+        cat: r.cat,
+        type: r.type,
+        purpose: r.purpose,
+        repay: r.repay,
+        term: r.term,
+        lvrMax: r.lvrMax,
+        from,
+        to,
+        delta: Math.round((to - from) * 10000) / 10000,
+      });
   }
   return changes.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
 }

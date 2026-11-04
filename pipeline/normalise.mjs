@@ -219,6 +219,8 @@ export function normaliseBrand(brand, rawProducts) {
 export const ISSUE_LABELS = {
   LIST_FAILED: 'Products endpoint unreachable or erroring',
   DETAIL_FAILED: 'Product detail endpoint failed',
+  NO_PRODUCTS: 'Endpoint responded but published no products',
+  EMPTY_PRODUCT_LIST: 'Products endpoint responded but published no products',
   RATE_SCALE: 'Rate published as a percentage instead of a decimal (e.g. 6.24 instead of 0.0624)',
   RATE_OUT_OF_RANGE: 'Implausible rate value (> 40%)',
   RATE_NOT_NUMERIC: 'Rate is not a number',

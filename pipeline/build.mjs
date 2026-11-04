@@ -72,8 +72,9 @@ async function main() {
     }
 
     const all = [
-      ...r.errors.map((e) => ({ code: e.stage === 'list' ? 'LIST_FAILED' : 'DETAIL_FAILED', productId: e.productId ?? null, value: e.message })),
+      ...r.errors.map((e) => ({ code: e.stage === 'list' ? 'LIST_FAILED' : e.stage === 'empty' ? 'EMPTY_PRODUCT_LIST' : 'DETAIL_FAILED', productId: e.productId ?? null, value: e.message })),
       ...issues,
+      ...(r.ok && !ps.length ? [{ code: 'NO_PRODUCTS', value: 'Products endpoint responded but listed no products' }] : []),
     ];
     const byCode = {};
     for (const i of all) {
