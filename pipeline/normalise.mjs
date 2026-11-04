@@ -15,6 +15,11 @@ export const CATEGORY_LABELS = {
   TRAVEL_CARDS: 'Travel cards',
 };
 
+// Products a typical consumer can't take out: kept in the data, left out of consumer comparisons.
+const BUSINESS_NAME = /\b(business|commercial|corporate|company|companies|smsf|self[- ]managed super|farm|farming|agri\w*|equipment finance|not[- ]for[- ]profit|community organisation|trust account|practice)\b/i;
+const STAFF_NAME = /\b(staff|employee)\b/i;
+const SPECIAL_NAME = /\b(fee assistance|bridging|reverse mortgage|line of credit|construction only)\b/i;
+
 const COMPARABLE_LENDING = new Set(['FIXED', 'VARIABLE', 'INTRODUCTORY', 'PURCHASE', 'CASH_ADVANCE', 'FLOATING', 'MARKET_LINKED']);
 const COMPARABLE_DEPOSIT = new Set(['FIXED', 'VARIABLE', 'BONUS', 'BUNDLE_BONUS', 'INTRODUCTORY', 'FLOATING', 'MARKET_LINKED']);
 
@@ -133,6 +138,11 @@ export function normaliseBrand(brand, rawProducts) {
       overviewUri: p.additionalInformation?.overviewUri || null,
       feesUri: p.additionalInformation?.feesAndPricingUri || null,
       tailored: !!p.isTailored,
+      business:
+        BUSINESS_NAME.test(p.name || '') ||
+        (p.eligibility || []).some((e) => ['BUSINESS', 'MIN_TURNOVER'].includes(e.eligibilityType)),
+      staff: STAFF_NAME.test(p.name || '') || (p.eligibility || []).some((e) => e.eligibilityType === 'STAFF'),
+      special: SPECIAL_NAME.test(p.name || ''),
       lastUpdated: p.lastUpdated || null,
       effectiveFrom: p.effectiveFrom || null,
       features: [...new Set(featureTypes)],

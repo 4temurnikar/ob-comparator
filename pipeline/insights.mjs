@@ -25,18 +25,32 @@ const termIs = (r, t) => t === null || (r.term !== null && Math.abs(r.term - t) 
  * Rank brands by their best qualifying rate.
  * dir 'asc' → lowest is best (lending); 'desc' → highest is best (deposits).
  */
+// A rate this far better than the segment's median is treated as an outlier: usually a
+// special-purpose product (fee assistance, staff, discounted green add-on) or a publishing error.
+const OUTLIER_PP = 2;
+
 function rankBrands(rows, products, dir, value = (r) => r.rate, { includeTailored = false } = {}) {
-  const best = new Map();
-  for (const r of rows) {
+  const eligible = rows.filter((r) => {
     const p = products.get(r.k);
-    if (!p || (p.tailored && !includeTailored)) continue;
+    return p && !p.business && !p.staff && !p.special && (!p.tailored || includeTailored) && value(r) !== null;
+  });
+  const mid = median(eligible.map(value));
+  const excluded = [];
+  const best = new Map();
+  for (const r of eligible) {
+    const p = products.get(r.k);
     const v = value(r);
-    if (v === null) continue;
+    if (mid !== null && (dir === 'asc' ? v < mid - OUTLIER_PP : v > mid + OUTLIER_PP)) {
+      excluded.push({ brandId: p.brandId, brand: p.brand, key: p.key, product: p.name, rate: v });
+      continue;
+    }
     const cur = best.get(p.brandId);
     const better = !cur || (dir === 'asc' ? v < cur.rate : v > cur.rate) || (v === cur.rate && (r.comp ?? 99) < (cur.comp ?? 99));
     if (better) best.set(p.brandId, { brandId: p.brandId, brand: p.brand, key: p.key, product: p.name, rate: v, comp: r.comp ?? null, offset: p.offset, tailored: p.tailored, extra: r._extra ?? null });
   }
-  return [...best.values()].sort((a, b) => (dir === 'asc' ? a.rate - b.rate : b.rate - a.rate) || a.brand.localeCompare(b.brand));
+  const ranking = [...best.values()].sort((a, b) => (dir === 'asc' ? a.rate - b.rate : b.rate - a.rate) || a.brand.localeCompare(b.brand));
+  ranking.excluded = [...new Map(excluded.map((x) => [x.key, x])).values()];
+  return ranking;
 }
 
 function board(id, group, label, scenario, ranking, dir) {
@@ -49,6 +63,7 @@ function board(id, group, label, scenario, ranking, dir) {
     n: ranking.length,
     median: median(ranking.map((r) => r.rate)),
     ranking,
+    excluded: ranking.excluded || [],
   };
 }
 

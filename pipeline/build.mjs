@@ -13,7 +13,7 @@ const t0 = Date.now();
 const log = (...a) => console.log(`[${((Date.now() - t0) / 1000).toFixed(1)}s]`, ...a);
 
 const RATE_COLS = ['k', 'kind', 'cat', 'type', 'comparable', 'rate', 'comp', 'purpose', 'repay', 'term', 'lvrMin', 'lvrMax', 'balMin', 'balMax', 'tierNote', 'info'];
-const PRODUCT_COLS = ['key', 'brandId', 'brand', 'productId', 'name', 'category', 'uri', 'tailored', 'lastUpdated', 'features', 'offset', 'redraw', 'yearlyFees', 'monthlyFee', 'upfrontFees', 'detailMissing'];
+const PRODUCT_COLS = ['key', 'brandId', 'brand', 'productId', 'name', 'category', 'uri', 'tailored', 'business', 'staff', 'special', 'lastUpdated', 'features', 'offset', 'redraw', 'yearlyFees', 'monthlyFee', 'upfrontFees', 'detailMissing'];
 const columnar = (cols, rows) => ({ columns: cols, rows: rows.map((r) => cols.map((c) => r[c] ?? null)) });
 const fromColumnar = (d) => (d?.rows || []).map((row) => Object.fromEntries(d.columns.map((c, i) => [c, row[i]])));
 const safe = (s) => String(s).replace(/[^a-zA-Z0-9_-]/g, '_');
