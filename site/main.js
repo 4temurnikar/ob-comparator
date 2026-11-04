@@ -166,7 +166,7 @@ function table(el, cols, rows, state, onRow) {
   el.querySelectorAll('tbody tr').forEach((tr) => tr.addEventListener('click', () => onRow?.(rows[+tr.dataset.i])));
 }
 
-const bankCell = (p) => `<div class="bank">${esc(p.brand)}</div><div class="prod">${esc(p.name)}${p.tailored ? ' <span class="tag warn">Tailored</span>' : ''}</div>`;
+const bankCell = (p) => `<div class="bank">${esc(p.brand)}</div><div class="prod">${esc(p.name)}${p.tailored ? ' <span class="tag warn">Tailored</span>' : ''}${p.business ? ' <span class="tag">Business</span>' : ''}${p.staff ? ' <span class="tag">Staff only</span>' : ''}</div>`;
 const featureTags = (p) => (p.features || []).filter((f) => FEATURE[f]).map((f) => `<span class="tag ${f === 'OFFSET' ? 'good' : ''}">${FEATURE[f]}</span>`).join('');
 const brandOptions = () => [...new Set(D.products.map((p) => p.brand))].sort().map((b) => `<option>${esc(b)}</option>`).join('');
 
@@ -174,6 +174,25 @@ const changeDesc = (c) =>
   [CAT[c.cat] || c.cat, c.type.toLowerCase().replace(/_/g, ' ') + (c.term ? ` ${termLabel(c.term)}` : ''), c.purpose && !['UNSPECIFIED', 'UNCONSTRAINED'].includes(c.purpose) ? (LABEL[c.purpose] || c.purpose).toLowerCase() : null, c.repay && !['UNSPECIFIED', 'UNCONSTRAINED'].includes(c.repay) ? LABEL[c.repay] || c.repay : null, c.lvrMax ? `up to ${c.lvrMax}% LVR` : null]
     .filter(Boolean)
     .join(', ');
+
+// Business, staff-only and special-purpose products are hidden from consumer pages unless asked for.
+const consumerOk = (p, includeBusiness) => includeBusiness || (!p.business && !p.staff && !p.special);
+// Mark rates far better than the typical rate in the current view: usually special-purpose products or errors.
+const OUTLIER_PP = 2;
+function markOutliers(rows, dir, get = (r) => r.rate) {
+  const vals = rows.map(get).filter((v) => v !== null && Number.isFinite(v)).sort((a, b) => a - b);
+  if (vals.length < 4) return rows;
+  const m = vals.length >> 1;
+  const mid = vals.length % 2 ? vals[m] : (vals[m - 1] + vals[m]) / 2;
+  for (const r of rows) {
+    const v = get(r);
+    r.outlier = v !== null && (dir === 'asc' ? v < mid - OUTLIER_PP : v > mid + OUTLIER_PP);
+  }
+  return rows;
+}
+const outlierTag = '<span class="tag warn" title="Far from the typical rate. Usually a special-purpose product or a publishing error. Check the details before relying on it.">Check details</span>';
+// Outliers sort after normal rows when sorting by rate, so they never top the table.
+const rateSort = (get, dir) => (r) => (r.outlier ? (dir === 'asc' ? 1000 : -1000) : 0) + get(r);
 
 // ---------- OVERVIEW (front page: deliberately short)
 const LEDGER = [
@@ -302,7 +321,12 @@ function drawBoard(id) {
         <span class="bar-track"><span class="bar-fill" style="width:${w(r.rate).toFixed(1)}%"></span></span>
         <span class="val">${pct(r.rate)}</span></div>`
     )
-    .join('')}</div><p class="median-note">Typical rate across ${b.n} lenders: <b>${pct(b.median)}</b>. ${b.dir === 'asc' ? 'Lower is better.' : 'Higher is better.'}${b.n > 40 ? ' Top 40 shown.' : ''}</p></div>`;
+    .join('')}</div><p class="median-note">Typical rate across ${b.n} lenders: <b>${pct(b.median)}</b>. ${b.dir === 'asc' ? 'Lower is better.' : 'Higher is better.'}${b.n > 40 ? ' Top 40 shown.' : ''}</p>${
+    b.excluded?.length
+      ? `<p class="median-note">Set aside as unusual, so not ranked: ${b.excluded.map((x) => `<button class="textbtn small" data-k="${esc(x.key)}">${esc(x.brand)} ${esc(x.product)} (${pct(x.rate)})</button>`).join(', ')}.</p>`
+      : ''
+  }</div>`;
+  el.querySelectorAll('.median-note [data-k]').forEach((x) => x.addEventListener('click', () => openProduct(x.dataset.k)));
   el.querySelectorAll('.bar-row').forEach((row) => row.addEventListener('click', () => openProduct(row.dataset.k)));
 }
 
@@ -329,7 +353,7 @@ function drawChanges() {
 }
 
 // ---------- HOME LOANS
-const hl = { purpose: 'OWNER_OCCUPIED', repay: 'PRINCIPAL_AND_INTEREST', type: 'VARIABLE', term: 36, lvr: 80, amount: 600000, years: 30, offset: false, tailored: false, best: true, brand: '', t: {} };
+const hl = { purpose: 'OWNER_OCCUPIED', repay: 'PRINCIPAL_AND_INTEREST', type: 'VARIABLE', term: 36, lvr: 80, amount: 600000, years: 30, offset: false, tailored: false, business: false, best: true, brand: '', t: {} };
 renderers.home = () => {
   const el = $('#tab-home');
   el.innerHTML = `
@@ -347,6 +371,7 @@ renderers.home = () => {
       <label class="check"><input type="checkbox" data-k="offset" /> Offset only</label>
       <label class="check"><input type="checkbox" data-k="best" /> Best per lender</label>
       <label class="check"><input type="checkbox" data-k="tailored" /> Include tailored</label>
+      <label class="check"><input type="checkbox" data-k="business" /> Show business products</label>
     </div>
     <div id="hl-table"></div>`;
   bindFilters($('#hl-f', el), hl, drawHome);
@@ -361,18 +386,19 @@ function drawHome() {
     if (hl.type === 'FIXED' && (r.term === null || Math.abs(r.term - hl.term) >= 0.5)) continue;
     if (!matchP(r.purpose, hl.purpose) || !matchP(r.repay, hl.repay) || !appliesLvr(r, hl.lvr)) continue;
     const p = productByKey.get(r.k);
-    if (!p || (p.tailored && !hl.tailored) || (hl.offset && !p.offset) || (hl.brand && p.brand !== hl.brand)) continue;
+    if (!p || !consumerOk(p, hl.business) || (p.tailored && !hl.tailored) || (hl.offset && !p.offset) || (hl.brand && p.brand !== hl.brand)) continue;
     const key = hl.best ? p.brandId : p.key;
     const cur = best.get(key);
     if (!cur || r.rate < cur.r.rate) best.set(key, { r, p });
   }
   for (const { r, p } of best.values())
     rows.push({ ...r, p, monthly: monthlyRepayment(hl.amount, r.rate, hl.years, hl.repay === 'INTEREST_ONLY'), fees: p.yearlyFees });
+  markOutliers(rows, 'asc');
   table(
     $('#hl-table'),
     [
-      { key: 'brand', label: 'Lender / product', fmt: (r) => bankCell(r.p), sort: (r) => r.p.brand },
-      { key: 'rate', label: 'Rate', n: true, cls: 'rate', fmt: (r) => pct(r.rate), defaultSort: true },
+      { key: 'brand', label: 'Lender / product', fmt: (r) => bankCell(r.p) + (r.outlier ? outlierTag : ''), sort: (r) => r.p.brand },
+      { key: 'rate', label: 'Rate', n: true, cls: 'rate', fmt: (r) => pct(r.rate), defaultSort: true, sort: rateSort((r) => r.rate, 'asc') },
       { key: 'comp', label: 'Comparison', n: true, fmt: (r) => pct(r.comp) },
       { key: 'monthly', label: 'Monthly repayment', n: true, fmt: (r) => money(r.monthly) },
       { key: 'fees', label: 'Ongoing fees / yr', n: true, fmt: (r) => money(r.fees) },
@@ -398,7 +424,7 @@ function bindFilters(root, state, redraw) {
 }
 
 // ---------- DEPOSITS
-const dep = { mode: 'savings', balance: 10000, term: 12, conditions: true, brand: '', ts: {}, tt: {} };
+const dep = { mode: 'savings', balance: 10000, term: 12, conditions: true, business: false, brand: '', ts: {}, tt: {} };
 renderers.deposits = () => {
   const el = $('#tab-deposits');
   el.innerHTML = `
@@ -409,6 +435,7 @@ renderers.deposits = () => {
       <label class="field" id="dep-term">Term<select data-k="term"><option value="1">1 month</option><option value="3">3 months</option><option value="4">4 months</option><option value="6">6 months</option><option value="9">9 months</option><option value="12">12 months</option><option value="18">18 months</option><option value="24">2 years</option><option value="36">3 years</option><option value="48">4 years</option><option value="60">5 years</option></select></label>
       <label class="field">Provider<select data-k="brand"><option value="">All providers</option>${brandOptions()}</select></label>
       <label class="check" id="dep-cond"><input type="checkbox" data-k="conditions" /> Include bonus rates (conditions apply)</label>
+      <label class="check"><input type="checkbox" data-k="business" /> Show business products</label>
     </div><div id="dep-table"></div>`;
   bindFilters($('#dep-f', el), dep, drawDeposits);
   drawDeposits();
@@ -428,16 +455,16 @@ function drawDeposits() {
     for (const r of D.rates) {
       if (r.cat !== 'TERM_DEPOSITS' || r.kind !== 'D' || r.type !== 'FIXED' || r.term === null || Math.abs(r.term - dep.term) >= 0.5 || !appliesBal(r, dep.balance)) continue;
       const p = productByKey.get(r.k);
-      if (!p || (dep.brand && p.brand !== dep.brand)) continue;
+      if (!p || !consumerOk(p, dep.business) || (dep.brand && p.brand !== dep.brand)) continue;
       const cur = best.get(p.key);
       if (!cur || r.rate > cur.r.rate) best.set(p.key, { r, p });
     }
-    const rows = [...best.values()].map(({ r, p }) => ({ ...r, p, interest: (dep.balance * r.rate * (dep.term / 12)) / 100 }));
+    const rows = markOutliers([...best.values()].map(({ r, p }) => ({ ...r, p, interest: (dep.balance * r.rate * (dep.term / 12)) / 100 })), 'desc');
     return table(
       el,
       [
-        { key: 'brand', label: 'Provider / product', fmt: (r) => bankCell(r.p), sort: (r) => r.p.brand },
-        { key: 'rate', label: 'Rate p.a.', n: true, cls: 'rate', fmt: (r) => pct(r.rate), defaultSort: true, defaultDir: 'desc' },
+        { key: 'brand', label: 'Provider / product', fmt: (r) => bankCell(r.p) + (r.outlier ? outlierTag : ''), sort: (r) => r.p.brand },
+        { key: 'rate', label: 'Rate p.a.', n: true, cls: 'rate', fmt: (r) => pct(r.rate), defaultSort: true, defaultDir: 'desc', sort: rateSort((r) => r.rate, 'desc') },
         { key: 'interest', label: 'Interest at maturity', n: true, fmt: (r) => money(r.interest, 2), defaultDir: 'desc' },
         { key: 'bal', label: 'Balance range', fmt: (r) => `${money(r.balMin)}${r.balMax ? `\u2013${money(r.balMax)}` : '+'}`, sort: (r) => r.balMin },
         { key: 'info', label: 'Notes', fmt: (r) => `<span class="small muted">${esc(r.info || r.tierNote || '')}</span>` },
@@ -452,7 +479,7 @@ function drawDeposits() {
   for (const r of D.rates) {
     if (r.cat !== 'TRANS_AND_SAVINGS_ACCOUNTS' || r.kind !== 'D' || !appliesBal(r, dep.balance)) continue;
     const p = productByKey.get(r.k);
-    if (!p || (dep.brand && p.brand !== dep.brand)) continue;
+    if (!p || !consumerOk(p, dep.business) || (dep.brand && p.brand !== dep.brand)) continue;
     const e = per.get(p.key) || { p, k: p.key, base: 0, bonus: 0, bonusInfo: '', intro: null, introTerm: null };
     if (['VARIABLE', 'FLOATING', 'MARKET_LINKED'].includes(r.type)) e.base = Math.max(e.base, r.rate);
     else if ((r.type === 'BONUS' || r.type === 'BUNDLE_BONUS') && r.rate > e.bonus) Object.assign(e, { bonus: r.rate, bonusInfo: r.info || '' });
@@ -463,11 +490,12 @@ function drawDeposits() {
     .map((e) => ({ ...e, total: e.base + (dep.conditions ? e.bonus : 0) }))
     .filter((e) => e.total > 0 || e.intro)
     .map((e) => ({ ...e, yearly: (dep.balance * e.total) / 100 }));
+  markOutliers(rows, 'desc', (r) => r.total);
   table(
     el,
     [
-      { key: 'brand', label: 'Provider / account', fmt: (r) => bankCell(r.p), sort: (r) => r.p.brand },
-      { key: 'total', label: dep.conditions ? 'Max rate' : 'Base rate', n: true, cls: 'rate', fmt: (r) => pct(r.total), defaultSort: true, defaultDir: 'desc' },
+      { key: 'brand', label: 'Provider / account', fmt: (r) => bankCell(r.p) + (r.outlier ? outlierTag : ''), sort: (r) => r.p.brand },
+      { key: 'total', label: dep.conditions ? 'Max rate' : 'Base rate', n: true, cls: 'rate', fmt: (r) => pct(r.total), defaultSort: true, defaultDir: 'desc', sort: rateSort((r) => r.total, 'desc') },
       { key: 'base', label: 'Base', n: true, fmt: (r) => pct(r.base), defaultDir: 'desc' },
       { key: 'bonus', label: 'Bonus', n: true, fmt: (r) => (r.bonus ? pct(r.bonus) : '\u2014'), defaultDir: 'desc' },
       { key: 'intro', label: 'Intro offer', n: true, fmt: (r) => (r.intro ? `${pct(r.intro)}${r.introTerm ? ` <span class="small muted">for ${termLabel(r.introTerm)}</span>` : ''}` : '\u2014'), defaultDir: 'desc' },
@@ -481,7 +509,7 @@ function drawDeposits() {
 }
 
 // ---------- CARDS & PERSONAL LOANS
-const cp = { mode: 'cards', balance: 3000, nofee: false, tailored: true, brand: '', tc: {}, tp: {} };
+const cp = { mode: 'cards', balance: 3000, nofee: false, tailored: true, business: false, brand: '', tc: {}, tp: {} };
 renderers.cards = () => {
   const el = $('#tab-cards');
   el.innerHTML = `
@@ -492,6 +520,7 @@ renderers.cards = () => {
       <label class="field">Provider<select data-k="brand"><option value="">All providers</option>${brandOptions()}</select></label>
       <label class="check" id="cp-nofee"><input type="checkbox" data-k="nofee" /> $0 annual fee only</label>
       <label class="check" id="cp-tail"><input type="checkbox" data-k="tailored" /> Include tailored</label>
+      <label class="check"><input type="checkbox" data-k="business" /> Show business products</label>
     </div><div id="cp-table"></div>`;
   bindFilters($('#cp-f', el), cp, drawCards);
   drawCards();
@@ -510,7 +539,7 @@ function drawCards() {
   for (const r of D.rates) {
     if (r.cat !== cat || r.kind !== 'L' || !r.comparable) continue;
     const p = productByKey.get(r.k);
-    if (!p || (cp.brand && p.brand !== cp.brand) || (p.tailored && !cp.tailored)) continue;
+    if (!p || !consumerOk(p, cp.business) || (cp.brand && p.brand !== cp.brand) || (p.tailored && !cp.tailored)) continue;
     if (cp.mode === 'cards' && cp.nofee && p.yearlyFees) continue;
     const e = per.get(p.key) || { p, k: p.key, purchase: null, cash: null, fixed: null, variable: null, comp: null };
     const t = r.type;
