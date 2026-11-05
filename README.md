@@ -15,7 +15,16 @@ GET {base}/cds-au/v1/banking/products/{id}       (full detail per product)
      │
      ▼
 normalise ──► rates split by purpose / repayment / fixed term / LVR / balance tier
-     │        fees, features, eligibility, constraints, data-quality checks
+     │        fees, features, eligibility, constraints
+     ▼
+standards ─► every product checked against the Consumer Data Standards schema and rules
+     │
+     ▼
+web ───────► every URL the bank publishes in CDR (overview, fees & pricing, terms, eligibility,
+     │        additionalInfoUri…) plus rate sheets, fee schedules, PDS and key-facts PDFs one click away
+     ▼
+compare ───► each CDR rate, comparison rate and fee looked for on those pages and PDFs;
+     │        every link classed as working / broken / homepage / blocked / robots-excluded
      ▼
 insights ──► segment leaderboards, head-to-heads, market stats, day-on-day changes
      │
@@ -30,6 +39,12 @@ site/data/*.json ──► static website (GitHub Pages), rebuilt daily
 | `pipeline/fetch.mjs` | CDR Register discovery, product list paging, product detail fetch; one failing bank never breaks the run |
 | `pipeline/normalise.mjs` | Flattens `lendingRates`/`depositRates`/tiers/fees; parses ISO-8601 durations; flags non-conformant data |
 | `pipeline/insights.mjs` | Leaderboards and narrative insights; rate-change diff |
+| `pipeline/standards.mjs` | Consumer Data Standards checks: mandatory fields, allowed values, RateString / AmountString / date / URI / ISO-duration formats, conditional `additionalValue` and `additionalInfo` rules |
+| `pipeline/cds/banking-products.json` | Product schemas extracted from the official CDS OpenAPI file (v1.36.0: list v5, detail v7) |
+| `pipeline/web.mjs` | Website and PDF reader: robots.txt, 2 requests per host, size and time limits, optional headless Chromium for JavaScript pages, PDF text via pdf.js |
+| `pipeline/consistency.mjs` | Compares CDR figures with page and PDF content; link health |
+| `pipeline/dq.mjs` | Catalogue of every check: label, category, severity |
+| `scripts/update-cds-schema.mjs` | Refreshes the schema file when a new standard is published |
 | `pipeline/build.mjs` | Orchestrates the run and writes `site/data/` |
 | `site/` | The website — plain HTML/CSS/JS, no build step |
 | `scripts/mock-server.mjs` | Local mock of the Register + data-holder APIs (fictional banks) for offline testing |
@@ -41,7 +56,7 @@ site/data/*.json ──► static website (GitHub Pages), rebuilt daily
 - **Savings & term deposits** — base vs bonus vs intro rates and bonus conditions; term deposits by term with interest at maturity
 - **Cards & personal loans** — purchase/cash rates, annual fees, estimated yearly cost at your balance
 - **All products** — search every product from every bank
-- **Data quality** — per-holder conformance issues (e.g. rates published as 6.24 instead of 0.0624, missing comparison rates, missing `loanPurpose`, failing endpoints, API versions served)
+- **Data quality** — for every bank: standards conformance, data accuracy, link health and whether CDR rates and fees match the bank's own pages and PDFs. Each bank opens a full report listing every finding with the product, field, value and source page.
 
 Every row opens a detail panel with all published rates, fees, eligibility and constraints, plus a link to the bank's page.
 
@@ -58,7 +73,7 @@ After that it runs every day at ~4:20 am Melbourne time, commits the new data (g
 
 ## Run locally
 
-Requires Node 20+. No `npm install` needed.
+Requires Node 20+.
 
 ```bash
 npm run refresh        # fetch live data from all banks (~10–20 min)
@@ -73,7 +88,31 @@ npm run refresh:mock
 MOCK_SHIFT=1 npm run mock   # restart with shifted rates, refresh again to see change detection
 ```
 
-Useful environment variables: `CDR_BRAND_FILTER="commbank,anz"` (fetch only matching brands), `CDR_PER_HOST_CONCURRENCY`, `CDR_GLOBAL_CONCURRENCY`, `CDR_TIMEOUT_MS`, `CDR_SAVE_RAW=1` (keep raw payloads in `raw/` for debugging).
+Useful environment variables: `CDR_BRAND_FILTER="commbank,anz"` (fetch only matching brands), `CDR_PER_HOST_CONCURRENCY`, `CDR_GLOBAL_CONCURRENCY`, `CDR_TIMEOUT_MS`, `CDR_SAVE_RAW=1` (keep raw payloads in `raw/` for debugging), `CDR_WEB=0` (skip website and PDF checks), `CDR_WEB_RENDER=1` (render JavaScript pages with headless Chromium; needs `npm i playwright && npx playwright install chromium`), `CDR_WEB_BUDGET_MIN` (time limit for the web stage), `CDR_WEB_MAX_URLS` / `CDR_WEB_MAX_LINKED` (per-bank page limits).
+
+Run `npm install` once before the first local refresh (installs pdf.js for reading PDFs).
+
+## Data-quality checks
+
+| Category | What is checked |
+|---|---|
+| API availability | Product endpoints respond; product list not empty |
+| Standards conformance | At the current detail version (v7): mandatory fields, allowed values, data types. At every version: RateString, AmountString, RFC 3339 dates, ISO 4217 currencies, URIs, ISO 8601 durations, `additionalValue` / `additionalInfo` rules from the standard's Product Components tables (e.g. FIXED needs a term, PERIODIC fee needs a period, MAX_LVR as a RateString). Older versions are noted, not penalised. |
+| Data accuracy | Rates published as percentages instead of decimals, implausible values, home-loan rates without purpose / repayment type / comparison rate, products with no rates, stale `lastUpdated` |
+| Links | Broken links, product links that land on the homepage, http instead of https; blocked and robots-excluded pages are reported as "not checked", not as faults |
+| Matches the bank's website | Each CDR rate, comparison rate and fee looked for on the product's own pages and PDFs. Shared rate schedules are read only in the section about that product, so one product's figure can't confirm another's. |
+
+**Severity:** *error* breaks the standard or can't be used; *warning* is probably wrong or missing; *note* is informational.
+
+**Reading "not found" correctly:** it means the exact figure didn't appear on the pages and PDFs linked from that product. Rates loaded by JavaScript the reader couldn't run, images of tables, or different rounding can cause it. Treat it as a prompt to check, not proof of an error.
+
+### Things to know about the website checks
+
+- **Bot protection.** Some banks' sites block automated visitors, especially from overseas cloud servers like GitHub's. Those pages are reported as "blocked" and the product as "not checked". If many banks block the GitHub runner, run the job from an Australian machine or cloud region instead.
+- **Politeness.** The reader identifies itself in its user agent, obeys robots.txt, sends at most 2 requests at a time to any site, and only follows links one click from URLs the bank itself published in CDR.
+- **Run time.** The web stage stops starting new requests after `CDR_WEB_BUDGET_MIN` minutes (default 40) so the daily job always finishes; anything not reached is marked "not checked (time limit)".
+- **Terms of use.** Reading public pages and PDFs a bank links to from its own CDR data is low-risk, but check that it fits each site's terms before publishing findings about named banks.
+- **New standard versions.** Run `node scripts/update-cds-schema.mjs` to pull the latest schema from the ConsumerDataStandardsAustralia/standards repository.
 
 ## Comparison rules
 

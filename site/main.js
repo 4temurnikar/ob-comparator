@@ -225,6 +225,37 @@ const outlierTag = '<span class="tag warn" title="Far from the typical rate. Usu
 // Outliers sort after normal rows when sorting by rate, so they never top the table.
 const rateSort = (get, dir) => (r) => (r.outlier ? (dir === 'asc' ? 1000 : -1000) : 0) + get(r);
 
+// ---------- DATA-QUALITY TOTALS (shared by the home section and the report)
+// Never round up to 100% (or down to 0%) unless it really is all (or none)
+const pctOf = (a, b) => {
+  if (!b) return '\u2014';
+  if (a === b) return '100%';
+  const v = (a / b) * 100;
+  return `${v >= 99 ? Math.min(99.9, Math.floor(v * 10) / 10) : v < 1 && a > 0 ? '<1' : Math.round(v)}%`;
+};
+function dqTotals() {
+  const Q = Array.isArray(D.quality) ? { brands: D.quality.map((b) => ({ ...b, errors: 0, warnings: b.total, issues: b.issues.map((i) => ({ ...i, severity: 'warning', category: 'accuracy' })) })), categories: [] } : D.quality || { brands: [] };
+  const bs = Q.brands || [];
+  const sum = (f) => bs.reduce((a, b) => a + (f(b) || 0), 0);
+  const web = {};
+  for (const k of ['urls', 'linksOk', 'linksBroken', 'linksHomepage', 'linksBlocked', 'linksRobots', 'linksSkipped', 'pdfsRead', 'pagesRead', 'ratesChecked', 'ratesFound', 'feesChecked', 'feesFound', 'productsChecked', 'productsMatched', 'productsUnverifiable']) web[k] = sum((b) => b.web?.[k]);
+  web.linksChecked = web.urls - web.linksBlocked - web.linksRobots - web.linksSkipped;
+  const std = { checked: sum((b) => b.standards?.checked), withIssues: sum((b) => b.standards?.withIssues) };
+  const byCode = {};
+  for (const b of bs)
+    for (const g of b.issues || []) {
+      if (g.severity === 'info') continue;
+      const e = (byCode[g.code] ??= { code: g.code, label: g.label, category: g.category, severity: g.severity, count: 0, brands: 0 });
+      e.count += g.count;
+      e.brands++;
+    }
+  const top = Object.values(byCode).sort((a, b) => b.brands - a.brands || b.count - a.count);
+  return { Q, bs, web, std, errors: sum((b) => b.errors), warnings: sum((b) => b.warnings), top, hasWeb: web.urls > 0 };
+}
+const SEV = { error: 'Error', warning: 'Warning', info: 'Note' };
+const plural = (n, one, many = one + 's') => `${n.toLocaleString('en-AU')} ${n === 1 ? one : many}`;
+const sevBadge = (s) => `<span class="sev sev-${esc(s)}">${SEV[s] || esc(s)}</span>`;
+
 // ---------- HOME (one long page; the menu scrolls to its sections)
 const BEST = [
   { board: 'hl-oo-pi-var', label: 'Home loan', note: 'To live in, variable, principal & interest, 80% LVR', link: 'home-loans' },
@@ -245,10 +276,8 @@ renderers.insights = () => {
   const run = D.changes?.runs?.[0];
   const brands = D.brands || [];
   const failing = brands.filter((b) => !b.ok).length;
-  const issueTotal = (D.quality || []).reduce((a, q) => a + q.total, 0);
-  const byCode = {};
-  for (const q of D.quality || []) for (const i of q.issues) (byCode[i.code] ??= { label: i.label, n: 0, brands: 0 }), (byCode[i.code].n += i.count), byCode[i.code].brands++;
-  const topIssues = Object.values(byCode).sort((a, b) => b.brands - a.brands || b.n - a.n).slice(0, 4);
+  const T = dqTotals();
+  const topIssues = T.top.slice(0, 5);
   const n = D.meta.brandsOk;
 
   el.innerHTML = `
@@ -296,16 +325,16 @@ renderers.insights = () => {
 
     <section class="section" id="sec-quality">
       <h2 class="section-title">How good is the banks' data?</h2>
-      <p class="section-lede">Banks must keep the product data they publish accurate and up to date. We check every endpoint each morning and record what's missing or wrong.</p>
+      <p class="section-lede">Banks must keep the product data they publish accurate and up to date. Each morning we check it against the Consumer Data Standards, test every link, and compare the rates and fees with the bank's own web pages and PDFs.</p>
       <div class="stat-grid">
-        <div class="bigstat accent"><span class="bs-n">${issueTotal.toLocaleString('en-AU')}</span><span class="bs-l">data-quality issues found this morning, across ${(D.quality || []).length} banks and brands</span></div>
-        <div class="bigstat"><span class="bs-n">${brands.length - failing}<small>/${brands.length}</small></span><span class="bs-l">product endpoints responding</span></div>
-        <div class="bigstat"><span class="bs-n">${D.meta.products.toLocaleString('en-AU')}</span><span class="bs-l">products checked</span></div>
-        <div class="bigstat"><span class="bs-n">${failing}</span><span class="bs-l">banks we couldn't read today</span></div>
-        <div class="bigstat"><span class="bs-n">${D.meta.rates.toLocaleString('en-AU')}</span><span class="bs-l">rates compared</span></div>
+        <div class="bigstat accent"><span class="bs-n">${(T.errors + T.warnings).toLocaleString('en-AU')}</span><span class="bs-l">problems found this morning across ${T.bs.filter((b) => b.errors + b.warnings).length} of ${T.bs.length} banks and brands</span></div>
+        <div class="bigstat"><span class="bs-n">${T.hasWeb ? pctOf(T.web.ratesFound, T.web.ratesChecked) : '\u2014'}</span><span class="bs-l">of published rates also appear on the bank's own pages${T.hasWeb ? ` (${T.web.ratesFound.toLocaleString('en-AU')} of ${T.web.ratesChecked.toLocaleString('en-AU')})` : ''}</span></div>
+        <div class="bigstat"><span class="bs-n">${T.std.checked ? pctOf(T.std.checked - T.std.withIssues, T.std.checked) : '\u2014'}</span><span class="bs-l">of products meet the data standard with no issues</span></div>
+        <div class="bigstat"><span class="bs-n">${T.hasWeb ? T.web.linksBroken.toLocaleString('en-AU') : '\u2014'}</span><span class="bs-l">broken product links${T.hasWeb && T.web.linksHomepage ? `, plus ${T.web.linksHomepage} that just go to a homepage` : ''}</span></div>
+        <div class="bigstat"><span class="bs-n">${brands.length - failing}<small>/${brands.length}</small></span><span class="bs-l">product APIs responding</span></div>
       </div>
       ${topIssues.length ? `<h3 class="sub-title">Most common problems</h3>
-      <ul class="issue-rows">${topIssues.map((i) => `<li><span>${esc(i.label)}</span><span class="muted">${i.brands} bank${i.brands > 1 ? 's' : ''}, ${i.n.toLocaleString('en-AU')} instance${i.n > 1 ? 's' : ''}</span></li>`).join('')}</ul>` : ''}
+      <ul class="issue-rows">${topIssues.map((i) => `<li><span>${sevBadge(i.severity)} ${esc(i.label)}</span><span class="muted">${i.brands} bank${i.brands > 1 ? 's' : ''}, ${i.count.toLocaleString('en-AU')} instance${i.count > 1 ? 's' : ''}</span></li>`).join('')}</ul>` : ''}
       <p class="section-foot"><a class="btn-ghost" href="#data-quality">Open the full data-quality report</a></p>
     </section>
 
@@ -707,43 +736,117 @@ function drawAll() {
   );
 }
 
-// ---------- DATA QUALITY
+// ---------- DATA QUALITY REPORT
 renderers.quality = () => {
   const el = $('#tab-quality');
-  const q = new Map((D.quality || []).map((x) => [x.brandId, x]));
+  const T = dqTotals();
+  const q = new Map(T.bs.map((x) => [x.brandId, x]));
   const brands = D.brands || [];
   const failing = brands.filter((b) => !b.ok);
+  const cds = T.Q.cds;
   el.innerHTML = `
     <h2 class="page-title">Data quality</h2>
-    <p class="muted">How well each data holder's public product data conforms to the Consumer Data Standards \u2014 useful for spotting gaps that affect comparisons, and for holders checking their own implementation.</p>
+    <p class="muted dq-lede">Every morning each bank's published product data is checked three ways: against the Consumer Data Standards${cds ? ` (version ${esc(cds.spec)}, product detail v${cds.detail})` : ''}, for links that are broken or misleading, and against the rates and fees on the bank's own web pages and PDFs.</p>
     <div class="stats">
-      <div class="stat"><div class="v">${brands.length - failing.length}/${brands.length}</div><div class="l">endpoints responding</div></div>
-      <div class="stat"><div class="v">${(D.quality || []).length}</div><div class="l">brands with issues</div></div>
-      <div class="stat"><div class="v">${(D.quality || []).reduce((s, x) => s + x.total, 0).toLocaleString()}</div><div class="l">issues found</div></div>
+      <div class="stat"><div class="v">${brands.length - failing.length}/${brands.length}</div><div class="l">product APIs responding</div></div>
+      <div class="stat"><div class="v">${T.std.checked ? pctOf(T.std.checked - T.std.withIssues, T.std.checked) : '\u2014'}</div><div class="l">products with no standards issues</div></div>
+      <div class="stat"><div class="v">${T.hasWeb ? pctOf(T.web.linksOk, T.web.linksChecked) : '\u2014'}</div><div class="l">product links working${T.hasWeb ? ` (${T.web.linksChecked.toLocaleString('en-AU')} checked)` : ''}</div></div>
+      <div class="stat"><div class="v">${T.hasWeb ? pctOf(T.web.ratesFound, T.web.ratesChecked) : '\u2014'}</div><div class="l">rates confirmed on bank websites</div></div>
+      <div class="stat"><div class="v">${T.hasWeb ? pctOf(T.web.feesFound, T.web.feesChecked) : '\u2014'}</div><div class="l">fees confirmed on bank websites</div></div>
     </div>
-    <div id="dq-table"></div>`;
-  const rows = brands.map((b) => ({ ...b, q: q.get(b.brandId), total: q.get(b.brandId)?.total || 0 }));
+    ${T.hasWeb ? `<p class="small muted dq-note">Read ${T.web.pagesRead.toLocaleString('en-AU')} web pages and ${T.web.pdfsRead.toLocaleString('en-AU')} PDFs. ${T.web.linksBlocked || T.web.linksRobots ? `${plural(T.web.linksBlocked, 'page')} blocked automated checks and ${plural(T.web.linksRobots, 'page')} ${T.web.linksRobots === 1 ? 'was' : 'were'} excluded by the bank's robots.txt; those products are marked as not checked rather than wrong.` : ''}</p>` : ''}
+    <div id="dq-table"></div>
+    <div class="dq-help">
+      <h3>How to read this</h3>
+      <p>${sevBadge('error')} The data breaks the standard or can't be used, such as a rate in the wrong format or a broken link.</p>
+      <p>${sevBadge('warning')} Probably wrong or missing, such as a published rate that doesn't appear anywhere on the bank's own pages for that product.</p>
+      <p>${sevBadge('info')} Worth knowing but not a fault, such as a page that blocked our check or an older API version.</p>
+      <p class="muted small">"Not found on the bank's pages" means the exact figure didn't appear on the pages or PDFs linked from that product. Pages that load rates with JavaScript, or round them differently, can cause this, so check the source before concluding a figure is wrong.</p>
+    </div>`;
+  const rows = brands.map((b) => {
+    const x = q.get(b.brandId) || {};
+    const cat = x.byCategory || {};
+    return { ...b, x, problems: (x.errors || 0) + (x.warnings || 0), std: cat.standards || 0, acc: cat.accuracy || 0, links: cat.links || 0, webPct: x.web?.ratesChecked ? x.web.ratesFound / x.web.ratesChecked : null };
+  });
+  const cnt = (n) => (n ? `<b>${n.toLocaleString('en-AU')}</b>` : '<span class="muted">0</span>');
   table(
     $('#dq-table', el),
     [
-      { key: 'brand', label: 'Data holder brand', fmt: (b) => `<div class="bank">${esc(b.brand)}</div><div class="prod">${esc(b.baseUri)}</div>` },
-      { key: 'ok', label: 'Status', fmt: (b) => (b.ok ? '<span class="status-ok">Responding</span>' : '<span class="status-fail">Failed</span>'), sort: (b) => (b.ok ? 1 : 0) },
-      { key: 'products', label: 'Products', n: true },
-      { key: 'listVersion', label: 'API versions', fmt: (b) => `<span class="small">list v${esc(b.listVersion ?? '\u2014')}; detail ${Object.entries(b.detailVersions || {}).map(([v, n]) => `v${esc(v)}\u00d7${n}`).join(', ') || '\u2014'}</span>` },
-      { key: 'total', label: 'Issues', n: true, defaultSort: true, defaultDir: 'desc' },
-      {
-        key: 'detail',
-        label: 'What we found',
-        fmt: (b) =>
-          b.q ? `<ul class="issue-list">${b.q.issues.map((i) => `<li><b>${i.count}\u00d7</b> ${esc(i.label)} <code>${esc(i.code)}</code>${i.examples[0]?.product ? ` \u2014 e.g. ${esc(i.examples[0].product)}` : ''}${i.examples[0]?.value && i.code !== 'LIST_FAILED' ? ` <code>${esc(String(i.examples[0].value).slice(0, 60))}</code>` : ''}${i.code === 'LIST_FAILED' ? ` <span class="small muted">${esc(String(i.examples[0]?.value || '').slice(0, 400))}</span>` : ''}</li>`).join('')}</ul>` : '<span class="status-ok">No issues</span>',
-        sort: (b) => b.total,
-      },
+      { key: 'brand', label: 'Bank or brand', fmt: (b) => `<div class="bank">${esc(b.brand)}</div><div class="prod">${b.ok ? `API list v${esc(b.listVersion ?? '\u2014')}, detail ${Object.entries(b.detailVersions || {}).map(([v, n]) => `v${esc(v)}\u00d7${n}`).join(', ') || '\u2014'}` : '<span class="status-fail">API not responding</span>'}</div>` },
+      { key: 'std', label: 'Standards', n: true, fmt: (b) => cnt(b.std) },
+      { key: 'acc', label: 'Accuracy', n: true, fmt: (b) => cnt(b.acc) },
+      { key: 'links', label: 'Links', n: true, fmt: (b) => cnt(b.links) },
+      { key: 'webPct', label: 'Rates on website', n: true, fmt: (b) => (b.webPct === null ? '<span class="muted">not checked</span>' : `${pctOf(b.x.web.ratesFound, b.x.web.ratesChecked)} <span class="small muted">(${b.x.web.ratesFound}/${b.x.web.ratesChecked})</span>`), defaultDir: 'asc' },
+      { key: 'problems', label: 'Problems', n: true, fmt: (b) => `${b.x.errors ? `<span class="sev-n err">${b.x.errors}</span>` : ''}${b.x.warnings ? `<span class="sev-n warn">${b.x.warnings}</span>` : ''}${!b.problems ? '<span class="status-ok">None</span>' : ''}`, defaultSort: true, defaultDir: 'desc' },
     ],
     rows,
-    { sort: 'total', dir: 'desc' },
-    null
+    { sort: 'problems', dir: 'desc' },
+    (b) => openBrandReport(b.brandId)
   );
 };
+
+// One bank's full report, in the side panel
+const dqCache = new Map();
+async function openBrandReport(brandId) {
+  const T = dqTotals();
+  const x = T.bs.find((b) => b.brandId === brandId);
+  const b = (D.brands || []).find((y) => y.brandId === brandId);
+  const drawer = $('#drawer');
+  const body = $('#drawer-body');
+  drawer.hidden = false;
+  document.body.style.overflow = 'hidden';
+  body.innerHTML = `<h2 id="drawer-title">${esc(b?.brand || x?.brand || '')}</h2><div class="empty">Loading the report\u2026</div>`;
+  let f = { issues: [], links: [], checks: [], codes: {} };
+  if (x?.file) {
+    if (!dqCache.has(x.file)) dqCache.set(x.file, fetch(DATA + x.file).then((r) => r.json()).catch(() => null));
+    f = (await dqCache.get(x.file)) || f;
+  }
+  const cats = T.Q.categories?.length ? T.Q.categories : [{ id: 'accuracy', label: 'Issues' }];
+  const link = (u) => (safeUrl(u) ? `<a href="${esc(u)}" target="_blank" rel="noopener nofollow">${esc(u.replace(/^https?:\/\//, '').slice(0, 90))}</a>` : esc(u ?? ''));
+  const cell = (v) => (typeof v === 'string' && /^https?:\/\//.test(v) ? link(v) : `<code>${esc(v ?? '')}</code>`);
+  const w = x?.web;
+  const groupsHtml = cats
+    .map((c) => {
+      const groups = (x?.issues || []).filter((g) => g.category === c.id);
+      if (!groups.length) return '';
+      return `<h4>${esc(c.label)}</h4>${groups
+        .map((g) => {
+          const items = f.issues.filter((i) => i.code === g.code).slice(0, 150);
+          return `<details class="dq-group"><summary>${sevBadge(g.severity)}<span class="g-label">${esc(g.label)}</span><span class="g-count">${g.count.toLocaleString('en-AU')}${g.products ? ` in ${g.products} product${g.products > 1 ? 's' : ''}` : ''}</span></summary>
+            <div class="table-wrap"><table><thead><tr><th>Product</th><th>Field</th><th>Value</th><th>Detail</th></tr></thead><tbody>${items
+              .map((i) => `<tr><td>${esc(i.product || '\u2014')}</td><td>${i.field ? `<code>${esc(i.field)}</code>` : ''}</td><td>${i.value !== null && i.value !== undefined ? cell(i.value) : ''}</td><td class="small">${typeof i.detail === 'string' && /^https?:/.test(i.detail) ? link(i.detail) : esc(i.detail || '')}</td></tr>`)
+              .join('')}</tbody></table></div>${g.count > items.length ? `<p class="small muted">Showing ${items.length} of ${g.count}.</p>` : ''}</details>`;
+        })
+        .join('')}`;
+    })
+    .join('');
+  const mismatches = (f.checks || []).filter((c) => c.status === 'mismatch');
+  const badLinks = (f.links || []).filter((l) => l.status !== 'ok');
+  const STATUS = { broken: 'Broken', invalid: 'Invalid URL', homepage: 'Goes to homepage', blocked: 'Blocked our check', robots: 'Excluded by robots.txt', skipped: 'Not checked (time limit)' };
+  body.innerHTML = `
+    <h2 id="drawer-title">${esc(b?.brand || x?.brand || '')}</h2>
+    <div class="muted">${esc(b?.baseUri || '')}</div>
+    <div class="dq-chips">${x?.errors ? `<span class="sev-n err">${plural(x.errors, 'error')}</span>` : ''}${x?.warnings ? `<span class="sev-n warn">${plural(x.warnings, 'warning')}</span>` : ''}${x?.infos ? `<span class="sev-n note">${plural(x.infos, 'note')}</span>` : ''}${!x?.total ? '<span class="status-ok">No issues found</span>' : ''}</div>
+    <dl class="kv">
+      <dt>Standards</dt><dd>${x?.standards ? `${x.standards.checked - x.standards.withIssues} of ${x.standards.checked} products with no issues` : '\u2014'}</dd>
+      <dt>Website match</dt><dd>${w ? `${w.ratesFound} of ${w.ratesChecked} rates and ${w.feesFound} of ${w.feesChecked} fees found on the bank's pages` : 'Not checked'}</dd>
+      <dt>Pages read</dt><dd>${w ? `${w.pagesRead} web pages, ${w.pdfsRead} PDFs` : '\u2014'}</dd>
+      <dt>Links</dt><dd>${w ? `${w.linksOk} of ${w.urls} working${w.linksBroken ? `, ${w.linksBroken} broken` : ''}${w.linksHomepage ? `, ${w.linksHomepage} to homepage` : ''}${w.linksBlocked ? `, ${w.linksBlocked} blocked` : ''}` : '\u2014'}</dd>
+    </dl>
+    ${mismatches.length ? `<h4>Figures not found on the bank's pages</h4>${mismatches
+      .slice(0, 60)
+      .map((c) => `<div class="mm"><div class="mm-head"><b>${esc(c.product)}</b></div><ul>${c.items
+        .filter((i) => !i.found)
+        .map((i) => `<li>${esc(i.what)}: CDR says <b>${i.kind === 'fee' ? '$' + i.value.toFixed(2) : i.value.toFixed(2) + '%'}</b>${i.closest?.length ? `; nearest on the page: ${i.closest.map((v) => (i.kind === 'fee' ? '$' + v.toFixed(2) : v.toFixed(2) + '%')).join(', ')}` : ''}</li>`)
+        .join('')}</ul><div class="small muted">Checked: ${c.sources.map((s) => link(s.url)).join(', ')}</div></div>`)
+      .join('')}` : ''}
+    ${groupsHtml || '<p class="muted">Nothing to report.</p>'}
+    ${badLinks.length ? `<h4>Links that need attention</h4><div class="table-wrap"><table><thead><tr><th>Status</th><th>Link</th><th>Used by</th></tr></thead><tbody>${badLinks
+      .slice(0, 200)
+      .map((l) => `<tr><td>${esc(STATUS[l.status] || l.status)}${l.httpStatus ? ` <span class="small muted">(HTTP ${l.httpStatus})</span>` : ''}</td><td class="small">${link(l.url)}${l.status === 'homepage' && l.finalUrl ? `<div class="muted">ends at ${link(l.finalUrl)}</div>` : ''}</td><td class="small">${esc(l.products.slice(0, 3).join(', '))}${l.products.length > 3 ? ` and ${l.products.length - 3} more` : ''}</td></tr>`)
+      .join('')}</tbody></table></div>` : ''}
+    ${f.truncated ? '<p class="small muted">This bank has a very large number of findings; the first 1,200 are listed here, and the counts above include them all.</p>' : ''}`;
+}
 
 // ---------- ABOUT
 renderers.about = () => {

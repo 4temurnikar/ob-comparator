@@ -135,6 +135,25 @@ function personal(b, { fixed, variable }) {
   };
 }
 
+// Convert a product to the v7 detail shape. With `flaws`, add the kind of mistakes real holders make.
+function toV7(p, flaws = false) {
+  const q = structuredClone(p);
+  q.lendingRates = (q.lendingRates || []).map((r, i) => ({ ...r, applicationType: flaws && i === 0 ? undefined : 'PERIODIC' }));
+  q.depositRates = (q.depositRates || []).map((r) => ({ ...r, applicationType: 'PERIODIC' }));
+  const strTiers = (r) => ({ ...r, tiers: r.tiers?.map((t) => ({ ...t, minimumValue: String(t.minimumValue), ...(t.maximumValue !== undefined ? { maximumValue: String(t.maximumValue) } : {}) })) });
+  q.lendingRates = q.lendingRates.map(strTiers);
+  q.depositRates = q.depositRates.map(strTiers);
+  q.brand ??= 'Strict Version Bank';
+  q.description ??= q.name;
+  q.fees = (q.fees || []).map(({ amount, ...f }) => ({ ...f, feeMethodUType: 'fixedAmount', fixedAmount: { amount: flaws && f.feeType === 'PERIODIC' ? '$' + amount : amount } }));
+  if (flaws) {
+    q.lendingRates[2].comparisonRate = (Number(q.lendingRates[2].comparisonRate) * 100).toFixed(2) + '%';
+    q.constraints = [{ constraintType: 'MAX_LVR', additionalValue: '80' }];
+    q.lastUpdated = '2026-10-01';
+  }
+  return q;
+}
+
 const s = SHIFT ? 0.15 : 0;
 const BRANDS = [
   { slug: 'southern-cross', name: 'Southern Cross Bank (sample)', short: 'SCB', build: (b) => [
@@ -144,6 +163,10 @@ const BRANDS = [
     savings(b, { base: 1.6, bonus: 3.4, bonusInfo: 'Deposit $1,000+ and make no withdrawals in the month' }),
     txn(b, 5), card(b, { id: 'low', name: 'Low Rate Card', purchase: 12.99, cash: 21.99, fee: 59 }), card(b, { id: 'rewards', name: 'Rewards Platinum', purchase: 20.99, cash: 21.99, fee: 249 }),
     personal(b, { fixed: 9.99, variable: 10.49 }),
+    // Problem cases seen in real data
+    { ...mortgage(b, { id: 'feeassist', name: 'Fee Assistance Loan - Sub', ooVar: 0, invVar: 0, lvrSteps: [0, 0, 0], ioLoad: 0 }), fees: [] },
+    mortgage(b, { id: 'green', name: 'Green Home Loan Investment', ooVar: 2.79, invVar: 2.79, lvrSteps: [0, 0, 0] }),
+    { ...termDeposit(b, { rates: { 12: 5.7, 6: 5.5 } }), productId: 'southern-cross-biz-td', name: 'SCB 12 Month Business Term Deposit' },
   ] },
   { slug: 'harbour-mutual', name: 'Harbour Mutual (sample)', short: 'Harbour', build: (b) => [
     mortgage(b, { id: 'value', name: 'Value Variable', ooVar: 5.89, invVar: 6.49, lvrSteps: [0, 0.15, 0.6], fixed: { 1: 5.99, 2: 5.89, 3: 5.99 } }),
@@ -171,6 +194,11 @@ const BRANDS = [
     termDeposit(b, { rates: { 6: 4.0, 12: 4.1 } }),
     { productId: 'coral-coast-legacy', productCategory: 'RESIDENTIAL_MORTGAGES', name: 'Legacy Home Loan', lastUpdated: '2023-02-01T00:00:00Z', isTailored: false, features: [], fees: [], lendingRates: [] },
   ] },
+  // Strict holder: rejects x-min-v ranges and anything but one exact version (like some real holders)
+  { slug: 'strict-bank', name: 'Strict Version Bank (sample)', short: 'Strict', strict: { list: '5', detail: '7' }, build: (b) => [
+    toV7(mortgage(b, { id: 'basic', name: 'Strict Variable', ooVar: 6.0, invVar: 6.3, annual: 300 }), true),
+    toV7(savings(b, { base: 4.0 })),
+  ] },
   { slug: 'broken-bank', name: 'Broken Bank Ltd (sample)', short: 'Broken', broken: true, build: () => [] },
 ];
 
@@ -189,9 +217,94 @@ const send = (res, status, body, headers = {}) => {
   res.end(JSON.stringify(body));
 };
 
+// ---------- Fake bank websites and PDFs, with deliberate problems for the web checks
+const site = (b, path) => `${base}/site/${b.slug}${path}`;
+const LINK_OVERRIDES = {
+  'harbour-mutual-offset': '/p/missing', // broken link
+  'harbour-mutual-td': '/blocked/td', // bot protection
+  'yarra-community-smart': '/old/smart', // redirects to the homepage
+  'outback-digital-td': '/private/td', // excluded by robots.txt
+  'yarra-community-sav': '/js/saver', // only renders with JavaScript
+};
+function withLinks(b, p) {
+  if (p.productId === 'coral-coast-legacy') return p;
+  return {
+    ...p,
+    applicationUri: site(b, `/apply/${p.productId}`),
+    additionalInformation: { overviewUri: site(b, LINK_OVERRIDES[p.productId] || `/p/${p.productId}`), feesAndPricingUri: site(b, '/schedule.pdf') },
+  };
+}
+// What the bank's own website says. Southern Cross deliberately shows two figures that differ from its CDR data.
+function websiteLines(b, p) {
+  const out = [p.name];
+  const asPct = (v) => (Number(String(v).replace('%', '')) > 1 ? Number(String(v).replace('%', '')) : Number(v) * 100);
+  let firstVar = true;
+  for (const r of p.lendingRates || []) {
+    let v = asPct(r.rate);
+    if (p.productId === 'southern-cross-basic' && r.lendingRateType === 'FIXED' && r.additionalValue === 'P1Y' && r.loanPurpose === 'OWNER_OCCUPIED' && r.repaymentType === 'PRINCIPAL_AND_INTEREST') v += 0.05;
+    out.push(`${r.lendingRateType.toLowerCase()} ${r.loanPurpose || ''} ${r.repaymentType || ''} ${r.additionalValue || ''}: ${v.toFixed(2)}% p.a.${r.comparisonRate ? ` comparison rate ${asPct(r.comparisonRate).toFixed(2)}% p.a.` : ''}`);
+  }
+  for (const r of p.depositRates || []) out.push(`${r.depositRateType.toLowerCase()} ${r.additionalValue || ''}: ${asPct(r.rate).toFixed(2)}% p.a.`);
+  for (const f of p.fees || []) {
+    let a = Number(String(f.amount ?? f.fixedAmount?.amount ?? '0').replace('$', ''));
+    if (p.productId === 'southern-cross-package' && f.feeType === 'PERIODIC') a = 350;
+    out.push(`${f.name}: $${a.toFixed(2)}`);
+  }
+  return out;
+}
+const esc = (t) => String(t).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+const page = (title, body) => `<!doctype html><html><head><title>${esc(title)}</title></head><body><nav><a href="/">Home</a></nav><main>${body}</main><footer>Sample bank website for testing. This page has enough ordinary words to look like a real product page, with headings, features and conditions described in full sentences.</footer></body></html>`;
+// Minimal valid PDF with one text line per row
+function makePdf(lines) {
+  const content = ['BT', '/F1 10 Tf', '14 TL', '40 800 Td', ...lines.map((l) => `(${String(l).replace(/[()\\]/g, '\\$&')}) Tj T*`), 'ET'].join('\n');
+  const objs = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+    `<< /Length ${Buffer.byteLength(content)} >>\nstream\n${content}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  let pdf = '%PDF-1.4\n';
+  const offs = [];
+  objs.forEach((o, i) => {
+    offs.push(Buffer.byteLength(pdf));
+    pdf += `${i + 1} 0 obj\n${o}\nendobj\n`;
+  });
+  const xref = Buffer.byteLength(pdf);
+  pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offs.map((o) => String(o).padStart(10, '0') + ' 00000 n \n').join('')}`;
+  pdf += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+  return Buffer.from(pdf);
+}
+function serveSite(u, res) {
+  const html = (status, body, extra = {}) => (res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', ...extra }), res.end(body));
+  if (u.pathname === '/robots.txt') return res.writeHead(200, { 'content-type': 'text/plain' }), res.end('User-agent: *\nDisallow: /site/outback-digital/private/\n');
+  if (u.pathname === '/') return html(200, page('Sample bank home', '<h1>Welcome</h1><p>Choose a product.</p>'));
+  const m = u.pathname.match(/^\/site\/([^/]+)(\/.*)?$/);
+  const b = m && BRANDS.find((x) => x.slug === m[1]);
+  if (!b) return html(404, page('Not found', '<h1>Page not found</h1>'));
+  const rest = m[2] || '/';
+  const all = b.build(b);
+  if (rest === '/schedule.pdf') {
+    res.writeHead(200, { 'content-type': 'application/pdf' });
+    return res.end(makePdf([`${b.name} interest rates and fees`, ...all.flatMap((p) => websiteLines(b, p))]));
+  }
+  if (rest.startsWith('/old/')) return res.writeHead(301, { location: '/' }), res.end();
+  if (rest.startsWith('/blocked/')) return html(403, '<html><body><h1>Access Denied</h1>You don\'t have permission to access this server.</body></html>');
+  if (rest.startsWith('/apply/')) return html(200, page('Apply', '<h1>Apply online</h1><p>Start your application.</p>'));
+  const id = rest.startsWith('/js/') ? 'yarra-community-sav' : rest.startsWith('/private/') ? 'outback-digital-td' : decodeURIComponent(rest.replace(/^\/p\//, ''));
+  const p = all.find((x) => x.productId === id);
+  if (!p) return html(404, page('Not found', '<h1>Page not found</h1>'));
+  const lines = websiteLines(b, p);
+  const body = `<h1>${esc(p.name)}</h1><ul>${lines.slice(1).map((l) => `<li>${esc(l)}</li>`).join('')}</ul><p><a href="${site(b, '/schedule.pdf')}">Interest rates and fees schedule (PDF)</a> <a href="${site(b, '/terms')}">Terms and conditions</a></p>`;
+  if (rest.startsWith('/js/'))
+    return html(200, `<!doctype html><html><head><title>${esc(p.name)}</title></head><body><div id="app"></div><script>document.getElementById('app').innerHTML = ${JSON.stringify(body)};</script></body></html>`);
+  return html(200, page(p.name, body));
+}
+
 http
   .createServer((req, res) => {
     const u = new URL(req.url, base);
+    if (u.pathname === '/' || u.pathname === '/robots.txt' || u.pathname.startsWith('/site/')) return serveSite(u, res);
     const xv = req.headers['x-v'];
     if (!xv) return send(res, 400, { errors: [{ code: 'urn:au-cds:error:cds-all:Header/Missing', title: 'Missing Required Header', detail: 'x-v' }] });
     if (u.pathname === '/cdr-register/v1/banking/data-holders/brands/summary')
@@ -201,10 +314,16 @@ http
     const b = m && BRANDS.find((x) => x.slug === m[1]);
     if (!b) return send(res, 404, { errors: [{ code: 'urn:au-cds:error:cds-all:Resource/NotFound' }] });
     if (b.broken) return send(res, 503, { errors: [{ code: 'urn:au-cds:error:cds-all:Service/Unavailable' }] });
-    const all = b.build(b);
+    if (b.strict) {
+      const want = m[2] ? b.strict.detail : b.strict.list;
+      const xmin = req.headers['x-min-v'];
+      if (xv !== want || (xmin && xmin !== want))
+        return send(res, 406, { errors: [{ code: 'urn:au-cds:error:cds-all:Header/UnsupportedVersion', title: 'Unsupported Version', detail: `Requested version not supported` }] });
+    }
+    const all = b.build(b).map((p) => withLinks(b, p));
     if (m[2]) {
       const p = all.find((x) => x.productId === decodeURIComponent(m[2]));
-      return p ? send(res, 200, { data: p, links: { self: u.href }, meta: {} }, { 'x-v': '4' }) : send(res, 404, { errors: [] });
+      return p ? send(res, 200, { data: p, links: { self: u.href }, meta: {} }, { 'x-v': b.strict ? b.strict.detail : '4' }) : send(res, 404, { errors: [] });
     }
     // List: summary fields only, paginated 3 per page to exercise paging
     const size = 3;

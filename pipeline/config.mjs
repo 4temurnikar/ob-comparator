@@ -38,6 +38,26 @@ export const config = {
     termDepositTerms: [3, 6, 12, 24, 36, 60],
   },
 
+  // Website & PDF checks: follow the URLs each bank publishes in its CDR data, plus
+  // rate/fee/terms pages and PDFs linked one click from those pages.
+  web: {
+    enabled: process.env.CDR_WEB !== '0',
+    // Render JavaScript-heavy pages in headless Chromium when plain HTML has almost no text
+    render: process.env.CDR_WEB_RENDER === '1',
+    maxUrlsPerBrand: Number(process.env.CDR_WEB_MAX_URLS || 150),
+    maxLinkedDocsPerBrand: Number(process.env.CDR_WEB_MAX_LINKED || 60),
+    maxLinkedPerPage: 15,
+    perHostConcurrency: 2,
+    globalConcurrency: Number(process.env.CDR_WEB_CONCURRENCY || 12),
+    timeoutMs: 20000,
+    maxHtmlBytes: 4e6,
+    maxPdfBytes: 15e6,
+    maxPdfPages: 80,
+    // Stop starting new requests after this long, so the daily job always finishes
+    timeBudgetMs: Number(process.env.CDR_WEB_BUDGET_MIN || 40) * 60e3,
+    userAgent: 'cdr-product-comparator/1.0 (+public CDR product data quality check; respects robots.txt)',
+  },
+
   outDir: process.env.CDR_OUT_DIR || new URL('../site/data/', import.meta.url).pathname,
   historyDays: 30,
 };

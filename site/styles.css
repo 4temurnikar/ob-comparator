@@ -298,3 +298,34 @@ td.rate { font-weight: 700 !important; letter-spacing: -0.02em; }
   .faq summary { font-size: 17px; }
 }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+/* Data-quality report */
+.dq-lede { max-width: 78ch; }
+.dq-note { margin: 12px 0 0; max-width: 90ch; }
+.sev { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 7px; border-radius: 4px; margin-right: 6px; vertical-align: 1px; white-space: nowrap; }
+.sev-error { background: var(--bad-soft); color: var(--bad); }
+.sev-warning { background: var(--warn-soft); color: var(--warn); }
+.sev-info { background: var(--surface-2); color: var(--ink-2); }
+.sev-n { display: inline-block; font-size: 13px; font-weight: 600; padding: 1px 8px; border-radius: 999px; margin: 0 0 0 4px; font-variant-numeric: tabular-nums; }
+.sev-n.err { background: var(--bad-soft); color: var(--bad); }
+.sev-n.warn { background: var(--warn-soft); color: var(--warn); }
+.sev-n.note { background: var(--surface-2); color: var(--ink-2); }
+.dq-chips { margin: 12px 0 16px; display: flex; gap: 4px; flex-wrap: wrap; }
+.dq-chips .sev-n { margin: 0; }
+.dq-group { border: 1px solid var(--line); border-radius: 8px; margin: 8px 0; background: var(--surface); }
+.dq-group summary { list-style: none; cursor: pointer; display: flex; align-items: baseline; gap: 6px; padding: 11px 14px; font-size: 14.5px; }
+.dq-group summary::-webkit-details-marker { display: none; }
+.dq-group summary::before { content: '+'; color: var(--accent); font-weight: 600; width: 12px; flex: none; }
+.dq-group[open] summary::before { content: '\2212'; }
+.dq-group .g-label { flex: 1; }
+.dq-group .g-count { color: var(--ink-2); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dq-group .table-wrap { margin: 0 12px 12px; }
+.dq-group td code, .drawer td code { font-size: 12px; word-break: break-all; }
+.dq-group p { margin: 0 14px 12px; }
+.mm { border-left: 3px solid var(--warn); background: var(--surface); padding: 10px 14px; margin: 8px 0; border-radius: 0 8px 8px 0; }
+.mm ul { margin: 6px 0; padding-left: 18px; font-size: 14px; }
+.mm .small a { word-break: break-all; }
+.dq-help { margin-top: 32px; max-width: 80ch; }
+.dq-help h3 { font: 700 18px var(--sans); margin: 0 0 8px; }
+.dq-help p { margin: 6px 0; font-size: 14.5px; color: var(--ink-2); }
+.issue-rows .sev { margin-right: 8px; }

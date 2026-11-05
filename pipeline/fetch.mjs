@@ -58,6 +58,15 @@ export async function fetchBrand(brand) {
     });
     list = r.items;
     result.listVersion = r.version;
+    // Some holders return an empty list when page-size is supplied; retry with defaults.
+    if (!list.length) {
+      const r2 = await getAllPages(`${brand.publicBaseUri}${config.productsPath}`, config.productsVersion, 'products').catch(() => null);
+      if (r2?.items?.length) {
+        list = r2.items;
+        result.listVersion = r2.version;
+      }
+    }
+    if (!list.length) result.errors.push({ stage: 'empty', message: 'Products endpoint responded but returned no products', status: null });
   } catch (e) {
     result.errors.push({ stage: 'list', message: e.message, status: e.status ?? null });
     result.durationMs = Date.now() - started;
@@ -73,7 +82,7 @@ export async function fetchBrand(brand) {
       try {
         const { json, version } = await getJson(url, config.productDetailVersion);
         result.detailVersions[version] = (result.detailVersions[version] || 0) + 1;
-        result.products.push({ ...p, ...(json.data || {}) });
+        result.products.push({ ...p, ...(json.data || {}), _xv: version });
       } catch (e) {
         result.errors.push({ stage: 'detail', productId: p.productId, message: e.message, status: e.status ?? null });
         result.products.push({ ...p, _detailMissing: true });

@@ -107,11 +107,12 @@ export function normaliseBrand(brand, rawProducts) {
     const category = p.productCategory || 'UNKNOWN';
 
     const featureTypes = (p.features || []).map((f) => f.featureType).filter(Boolean);
+    // v7 nests fee values under fixedAmount / rateBased / variable; older versions keep them on the fee.
     const fees = (p.fees || []).map((f) => ({
       name: clip(f.name, 120),
       type: f.feeType,
-      amount: num(f.amount),
-      rate: pct(f.balanceRate ?? f.transactionRate ?? f.accruedRate, issues, { ...ctx, field: 'fee' }),
+      amount: num(f.amount ?? f.fixedAmount?.amount ?? f.variable?.feeMinimum),
+      rate: pct(f.balanceRate ?? f.transactionRate ?? f.accruedRate ?? f.rateBased?.rate, issues, { ...ctx, field: 'fee' }),
       freqMonths: feeFrequencyMonths(f),
       info: clip(f.additionalInfo, 160),
     }));
@@ -167,10 +168,11 @@ export function normaliseBrand(brand, rawProducts) {
       const tr = tierRanges(lr.tiers);
       const term = type === 'FIXED' || type === 'INTRODUCTORY' ? durationMonths(lr.additionalValue) : null;
       if (category === 'RESIDENTIAL_MORTGAGES' && COMPARABLE_LENDING.has(type)) {
-        if (!lr.loanPurpose) issues.push({ code: 'MORTGAGE_NO_PURPOSE', ...rctx });
-        if (!lr.repaymentType) issues.push({ code: 'MORTGAGE_NO_REPAYMENT_TYPE', ...rctx });
+        // At v7 these are mandatory and reported by the standards check instead.
+        const v7 = Number(p._xv) >= 7;
+        if (!lr.loanPurpose && !v7) issues.push({ code: 'MORTGAGE_NO_PURPOSE', ...rctx });
+        if (!lr.repaymentType && !v7) issues.push({ code: 'MORTGAGE_NO_REPAYMENT_TYPE', ...rctx });
         if (lr.comparisonRate === undefined || lr.comparisonRate === null) issues.push({ code: 'MORTGAGE_NO_COMPARISON_RATE', ...rctx });
-        if (type === 'FIXED' && term === null) issues.push({ code: 'FIXED_NO_TERM', ...rctx, value: lr.additionalValue ?? null });
       }
       rates.push({
         k: key,
@@ -196,8 +198,6 @@ export function normaliseBrand(brand, rawProducts) {
       if (rate === null) continue;
       const tr = tierRanges(dr.tiers);
       const term = type === 'FIXED' || type === 'INTRODUCTORY' ? durationMonths(dr.additionalValue) ?? tr.tierTermMin : null;
-      if (category === 'TERM_DEPOSITS' && type === 'FIXED' && term === null)
-        issues.push({ code: 'FIXED_NO_TERM', ...rctx, value: dr.additionalValue ?? null });
       rates.push({
         k: key,
         kind: 'D',

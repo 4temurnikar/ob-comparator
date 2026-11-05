@@ -28,9 +28,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
-      - name: Fetch every bank's product data and build insights
+      - name: Install dependencies (PDF reader)
         if: github.event_name != 'push'
+        run: npm ci --no-audit --no-fund
+
+      - name: Install headless Chromium (reads pages that need JavaScript)
+        if: github.event_name != 'push'
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.49.1
+          npx playwright install --with-deps chromium
+
+      - name: Fetch every bank's product data, check websites and PDFs, build insights
+        if: github.event_name != 'push'
+        env:
+          CDR_WEB_RENDER: '1'
+          CDR_WEB_BUDGET_MIN: '40'
         run: node pipeline/build.mjs
 
       - name: Commit refreshed data
