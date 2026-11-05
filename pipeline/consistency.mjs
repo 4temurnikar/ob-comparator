@@ -26,6 +26,19 @@ function describeRate(r) {
  * @param {{docs, productUrls, children}} web result of readBrand
  * @returns {{ checks: object[], links: object[], issues: object[], summary: object }}
  */
+// A failed fetch is only a broken link when the page is really missing (404, 410, unknown
+// domain, invalid certificate). Timeouts, dropped connections, server hiccups, bot walls (405)
+// and certificate chains browsers repair themselves are counted as "couldn't check" instead.
+const REAL_FAILURE = /ENOTFOUND|ERR_TLS_CERT_ALTNAME_INVALID|CERT_HAS_EXPIRED|DEPTH_ZERO_SELF_SIGNED_CERT|SELF_SIGNED_CERT_IN_CHAIN|ERR_INVALID_URL/;
+export function failure(d) {
+  const s = d.status;
+  if (s === 405) return 'blocked';
+  if (s >= 400 && s < 500) return 'broken';
+  if (s >= 500) return 'unchecked';
+  if (s && s < 400) return 'unchecked'; // page answered but we couldn't read it (too large, timed out mid-way)
+  return REAL_FAILURE.test(d.error || '') ? 'broken' : 'unchecked';
+}
+
 export function compareBrand(products, rates, web) {
   const issues = [];
   const checks = [];
@@ -52,7 +65,7 @@ export function compareBrand(products, rates, web) {
             : d.error && /invalid URL/.test(d.error)
               ? 'invalid'
               : !d.ok
-                ? 'broken'
+                ? failure(d)
                 : homepage && isProductPageField(field)
                   ? 'homepage'
                   : 'ok';
@@ -61,7 +74,8 @@ export function compareBrand(products, rates, web) {
       if (row.products.length < 50) row.products.push(p.name);
       linkRows.set(url, row);
       const base = { productId: p.productId, product: p.name, field, value: url };
-      if (status === 'broken' || status === 'invalid') issues.push({ code: 'LINK_BROKEN', ...base, detail: d.status ? `HTTP ${d.status}` : d.error });
+      if (status === 'broken' || status === 'invalid') issues.push({ code: 'LINK_BROKEN', ...base, detail: d.error || `HTTP ${d.status}` });
+      if (status === 'unchecked') issues.push({ code: 'LINK_UNCHECKED', ...base, detail: d.error || `HTTP ${d.status}` });
       if (status === 'homepage') issues.push({ code: 'LINK_HOMEPAGE', ...base, detail: d.finalUrl });
       if (status === 'blocked') issues.push({ code: 'LINK_BLOCKED', ...base, detail: d.status ? `HTTP ${d.status}` : null });
       if (status === 'robots') issues.push({ code: 'LINK_ROBOTS', ...base });
@@ -149,7 +163,7 @@ export function compareBrand(products, rates, web) {
       linksHomepage: count('homepage'),
       linksBlocked: count('blocked'),
       linksRobots: count('robots'),
-      linksSkipped: count('skipped'),
+      linksSkipped: count('skipped') + count('unchecked'),
       pdfsRead: [...web.docs.values()].filter((d) => d.ok && d.kind === 'pdf').length,
       pagesRead: [...web.docs.values()].filter((d) => d.ok && d.kind === 'html').length,
       ratesChecked,
